@@ -114,26 +114,17 @@ function getRemoteIcon(type: string | number) {
 }
 
 export interface GraphWrapperProps {
-	nonce?: string;
-	state: State;
-	subscriber: (callback: UpdateStateCallback) => () => void;
 	onChangeColumns?: (colsSettings: GraphColumnsConfig) => void;
-	onChangeExcludeTypes?: (key: keyof GraphExcludeTypes, value: boolean) => void;
 	onChangeGraphConfiguration?: (changes: UpdateGraphConfigurationParams['changes']) => void;
 	onChangeGraphSearchMode?: (searchMode: GraphSearchMode) => void;
-	onChangeRefIncludes?: (branchesVisibility: GraphBranchesVisibility, refs?: GraphRefOptData[]) => void;
-	onChangeRefsVisibility?: (refs: GraphExcludedRef[], visible: boolean) => void;
+	onChangeRefsVisibility?: (args: { refs: GraphExcludedRef[]; visible: boolean }) => void;
 	onChangeSelection?: (rows: GraphRow[]) => void;
-	onChooseRepository?: () => void;
-	onDoubleClickRef?: (ref: GraphRef, metadata?: GraphRefMetadataItem) => void;
-	onDoubleClickRow?: (row: GraphRow, preserveFocus?: boolean) => void;
-	onEnsureRowPromise?: (id: string, select: boolean) => Promise<DidEnsureRowParams | undefined>;
+	onDoubleClickRef?: (args: { ref: GraphRef; metadata?: GraphRefMetadataItem }) => void;
+	onDoubleClickRow?: (args: { row: GraphRow; preserveFocus?: boolean }) => void;
 	onHoverRowPromise?: (row: GraphRow) => Promise<DidGetRowHoverParams>;
-	onJumpToRefPromise?: (alt: boolean) => Promise<{ name: string; sha: string } | undefined>;
 	onMissingAvatars?: (emails: Record<string, string>) => void;
 	onMissingRefsMetadata?: (metadata: GraphMissingRefsMetadata) => void;
 	onMoreRows?: (id?: string) => void;
-	onOpenPullRequest?: (pr: NonNullable<NonNullable<State['branchState']>['pr']>) => void;
 	onSearch?: (search: SearchQuery | undefined, options?: { limit?: number }) => void;
 	onSearchPromise?: (
 		search: SearchQuery,
@@ -242,6 +233,554 @@ const emptySelectionContext: SelectionContext = {
 	webviewItemsValues: undefined,
 };
 
+const emptyRows: GraphRow[] = [];
+// eslint-disable-next-line @typescript-eslint/naming-convention
+export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps>) {
+	const {
+		activeRow,
+		avatars,
+		columns,
+		context,
+		theming,
+		config,
+		downstreams,
+		rows = [],
+		excludeRefs,
+		excludeTypes,
+		nonce,
+		paging,
+		loading,
+		selectedRows,
+		windowFocused,
+		refsMetadata,
+		includeOnlyRefs,
+		rowsStats,
+		rowsStatsLoading,
+		workingTreeStats,
+		onDoubleClickRef,
+		onDoubleClickRow,
+		onChangeGraphConfiguration,
+		onSearch,
+		onSearchOpenInView,
+	} = props;
+	const graphRef = useRef<GraphContainer>(null);
+	console.log('graph state', props.rows);
+
+	const handleKeyDown = (e: KeyboardEvent) => {
+		if (e.key === 'Enter' || e.key === ' ') {
+			const sha = getActiveRowInfo(activeRow ?? activeRow)?.id;
+			if (sha == null) return;
+
+			// TODO@eamodio a bit of a hack since the graph container ref isn't exposed in the types
+			const graph = (graphRef.current as any)?.graphContainerRef.current;
+			if (!e.composedPath().some(el => el === graph)) return;
+
+			const row = rows.find(r => r.sha === sha);
+			if (row == null) return;
+
+			onDoubleClickRow?.({ row: row, preserveFocus: e.key !== 'Enter' });
+		}
+	};
+
+	useEffect(() => {
+		window.addEventListener('keydown', handleKeyDown);
+
+		return () => {
+			window.removeEventListener('keydown', handleKeyDown);
+		};
+	}, [activeRow]);
+
+	const handleOnMinimapDaySelected = (e: CustomEvent<GraphMinimapDaySelectedEventDetail>) => {
+		let { sha } = e.detail;
+		if (sha == null) {
+			const date = e.detail.date?.getTime();
+			if (date == null) return;
+
+			// Find closest row to the date
+			const closest = rows.reduce((prev, curr) =>
+				Math.abs(curr.date - date) < Math.abs(prev.date - date) ? curr : prev,
+			);
+			sha = closest.sha;
+		}
+
+		graphRef.current?.selectCommits([sha], false, true);
+
+		queueMicrotask(
+			() =>
+				e.target &&
+				emitTelemetrySentEvent<'graph/minimap/day/selected'>(e.target, {
+					name: 'graph/minimap/day/selected',
+					data: {},
+				}),
+		);
+	};
+
+	const handleOnMinimapToggle = (_e: React.MouseEvent) => {
+		onChangeGraphConfiguration?.({ minimap: !config?.minimap });
+	};
+
+	// This can only be applied to one radio button for now due to a bug in the component: https://github.com/microsoft/fast/issues/6381
+	const handleOnMinimapDataTypeChange = (e: Event | FormEvent<HTMLElement>) => {
+		if (config == null) return;
+
+		const $el = e.target as RadioGroup;
+		const minimapDataType = $el.value === 'lines' ? 'lines' : 'commits';
+		if (config.minimapDataType === minimapDataType) return;
+
+		// setGraphConfig({ ...graphConfig, minimapDataType: minimapDataType });
+		onChangeGraphConfiguration?.({ minimapDataType: minimapDataType });
+	};
+
+	const handleOnMinimapAdditionalTypesChange = (e: Event | FormEvent<HTMLElement>) => {
+		if (config?.minimapMarkerTypes == null) return;
+
+		const $el = e.target as HTMLInputElement;
+		const value = $el.value as GraphMinimapMarkerTypes;
+
+		if ($el.checked) {
+			if (!config.minimapMarkerTypes.includes(value)) {
+				const minimapMarkerTypes = [...config.minimapMarkerTypes, value];
+				// setGraphConfig({ ...config, minimapMarkerTypes: minimapMarkerTypes });
+				onChangeGraphConfiguration?.({ minimapMarkerTypes: minimapMarkerTypes });
+			}
+		} else {
+			const index = config.minimapMarkerTypes.indexOf(value);
+			if (index !== -1) {
+				const minimapMarkerTypes = [...config.minimapMarkerTypes];
+				minimapMarkerTypes.splice(index, 1);
+				// setGraphConfig({ ...graphConfig, minimapMarkerTypes: minimapMarkerTypes });
+				onChangeGraphConfiguration?.({ minimapMarkerTypes: minimapMarkerTypes });
+			}
+		}
+	};
+
+	const stopColumnResize = () => {
+		const activeResizeElement = document.querySelector('.graph-header .resizable.resizing');
+		if (!activeResizeElement) return;
+
+		// Trigger a mouseup event to reset the column resize state
+		document.dispatchEvent(
+			new MouseEvent('mouseup', {
+				view: window,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+	};
+
+	const handleOnGraphMouseLeave = (_event: React.MouseEvent<any>) => {
+		// TODO:
+		// minimap.current?.unselect(undefined, true);
+		stopColumnResize();
+	};
+
+	const handleOnGraphRowHovered = (
+		event: React.MouseEvent<any>,
+		graphZoneType: GraphZoneType,
+		graphRow: GraphRow,
+	) => {
+		// if (graphZoneType === refZone) return;
+		// minimap.current?.select(graphRow.date, true);
+		// if (onHoverRowPromise == null) return;
+		// const hoverComponent = hover.current;
+		// if (hoverComponent == null) return;
+		// const { clientX } = event;
+		// const rect = event.currentTarget.getBoundingClientRect() as DOMRect;
+		// const x = clientX;
+		// const y = rect.top;
+		// const height = rect.height;
+		// const width = 60; // Add some width, so `skidding` will be able to apply
+		// const anchor = {
+		// 	getBoundingClientRect: function () {
+		// 		return {
+		// 			width: width,
+		// 			height: height,
+		// 			x: x,
+		// 			y: y,
+		// 			top: y,
+		// 			left: x,
+		// 			right: x + width,
+		// 			bottom: y + height,
+		// 		};
+		// 	},
+		// };
+		// hoverComponent.requestMarkdown ??= onHoverRowPromise;
+		// hoverComponent.onRowHovered(graphRow, anchor);
+	};
+
+	const handleOnGraphRowUnhovered = (
+		event: React.MouseEvent<any>,
+		graphZoneType: GraphZoneType,
+		graphRow: GraphRow,
+	) => {
+		// if (graphZoneType === refZone) return;
+		// hover.current?.onRowUnhovered(graphRow, event.relatedTarget);
+	};
+
+	// useEffect(() => {
+	// 	if (searchResultsError != null || searchResults == null || searchResults.count === 0 || searchQuery == null) {
+	// 		return;
+	// 	}
+
+	// 	searchEl.current?.logSearch(searchQuery);
+	// }, [searchResults]);
+
+	// const searchPosition: number = useMemo(() => {
+	// 	if (searchResults?.ids == null || !searchQuery?.query) return 0;
+
+	// 	const id = getActiveRowInfo(activeRow)?.id;
+	// 	let searchIndex = id ? searchResults.ids[id]?.i : undefined;
+	// 	if (searchIndex == null) {
+	// 		[searchIndex] = getClosestSearchResultIndex(searchResults, searchQuery, activeRow);
+	// 	}
+	// 	return searchIndex < 1 ? 1 : searchIndex + 1;
+	// }, [activeRow, searchResults]);
+
+	const hasFilters = useMemo(() => {
+		if (config?.onlyFollowFirstParent) return true;
+		if (excludeTypes == null) return false;
+
+		return Object.values(excludeTypes).includes(true);
+	}, [excludeTypes, config?.onlyFollowFirstParent]);
+
+	const handleSearchInput = (e: CustomEvent<SearchQuery>) => {
+		const detail = e.detail;
+		// setSearchQuery(detail);
+
+		const isValid = detail.query.length >= 3;
+		// setSearchResults(undefined);
+		// setSearchResultsError(undefined);
+		// setSearchResultsHidden(false);
+		// setSearching(isValid);
+		onSearch?.(isValid ? detail : undefined);
+	};
+
+	const handleSearchOpenInView = () => {
+		if (searchQuery == null) return;
+
+		// onSearchOpenInView?.(searchQuery);
+	};
+
+	const handleSearchModeChange = (e: CustomEvent<SearchModeChangeEventDetail>) => {
+		const { searchMode } = e.detail;
+		props.onChangeGraphSearchMode?.(searchMode);
+	};
+
+	const ensureSearchResultRow = async (id: string): Promise<string | undefined> => {
+		// if (onEnsureRowPromise == null) return id;
+		// if (ensuredIds.current.has(id)) return id;
+		// if (ensuredSkippedIds.current.has(id)) return undefined;
+		// let timeout: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+		// 	timeout = undefined;
+		// 	setIsLoading(true);
+		// }, 500);
+		// const e = await onEnsureRowPromise(id, false);
+		// if (timeout == null) {
+		// 	setIsLoading(false);
+		// } else {
+		// 	clearTimeout(timeout);
+		// }
+		// if (e?.id === id) {
+		// 	ensuredIds.current.add(id);
+		// 	return id;
+		// }
+		// if (e != null) {
+		// 	ensuredSkippedIds.current.add(id);
+		// }
+		// return undefined;
+	};
+
+	const handleMissingAvatars = (emails: GraphAvatars) => {
+		props.onMissingAvatars?.(emails);
+	};
+
+	const handleMissingRefsMetadata = (metadata: GraphMissingRefsMetadata) => {
+		props.onMissingRefsMetadata?.(metadata);
+	};
+
+	const handleToggleColumnSettings = (event: React.MouseEvent<HTMLButtonElement>) => {
+		const e = event.nativeEvent;
+		const evt = new MouseEvent('contextmenu', {
+			bubbles: true,
+			clientX: e.clientX,
+			clientY: e.clientY,
+		});
+		e.target?.dispatchEvent(evt);
+		e.stopImmediatePropagation();
+	};
+
+	const handleMoreCommits = () => {
+		// setIsLoading(true);
+		props.onMoreRows?.();
+	};
+
+	console.log('onmorerows', paging);
+
+	const handleOnColumnResized = (columnName: GraphColumnName, columnSettings: GraphColumnSetting) => {
+		if (columnSettings.width) {
+			props.onChangeColumns?.({
+				[columnName]: {
+					width: columnSettings.width,
+					isHidden: columnSettings.isHidden,
+					mode: columnSettings.mode as GraphColumnMode,
+					order: columnSettings.order,
+				},
+			});
+		}
+	};
+
+	const handleOnGraphVisibleRowsChanged = (top: GraphRow, bottom: GraphRow) => {
+		// setVisibleDays({
+		// 	top: new Date(top.date).setHours(23, 59, 59, 999),
+		// 	bottom: new Date(bottom.date).setHours(0, 0, 0, 0),
+		// });
+	};
+
+	const handleOnGraphColumnsReOrdered = (columnsSettings: GraphColumnsSettings) => {
+		const graphColumnsConfig: GraphColumnsConfig = {};
+		for (const [columnName, config] of Object.entries(columnsSettings as GraphColumnsConfig)) {
+			graphColumnsConfig[columnName] = { ...config };
+		}
+		props.onChangeColumns?.(graphColumnsConfig);
+	};
+
+	// dirty trick to avoid mutations on the GraphContainer side
+	const fixedExcludeRefsById = useMemo(() => ({ ...excludeRefs }), [excludeRefs]);
+	const handleOnToggleRefsVisibilityClick = (_event: any, refs: GraphRefOptData[], visible: boolean) => {
+		if (!visible) {
+			document.getElementById('hiddenRefs')?.animate(
+				[
+					{ offset: 0, background: 'transparent' },
+					{
+						offset: 0.4,
+						background: 'var(--vscode-statusBarItem-warningBackground)',
+					},
+					{ offset: 1, background: 'transparent' },
+				],
+				{
+					duration: 1000,
+					iterations: !Object.keys(fixedExcludeRefsById ?? {}).length ? 2 : 1,
+				},
+			);
+		}
+		props.onChangeRefsVisibility?.({ refs: refs, visible: visible });
+	};
+
+	const handleOnDoubleClickRef = (
+		_event: React.MouseEvent<HTMLButtonElement>,
+		refGroup: GraphRefGroup,
+		_row: GraphRow,
+		metadata?: GraphRefMetadataItem,
+	) => {
+		if (refGroup.length > 0) {
+			onDoubleClickRef?.({ refGroup: refGroup[0], metadata: metadata });
+		}
+	};
+
+	const handleOnDoubleClickRow = (
+		_event: React.MouseEvent<HTMLButtonElement>,
+		graphZoneType: GraphZoneType,
+		row: GraphRow,
+	) => {
+		if (graphZoneType === refZone) return;
+
+		onDoubleClickRow?.({ row: row, preserveFocus: true });
+	};
+
+	const handleRowContextMenu = (_event: React.MouseEvent<any>, graphZoneType: GraphZoneType, graphRow: GraphRow) => {
+		if (graphZoneType === refZone) return;
+		// hover.current?.hide();
+
+		// If the row is in the current selection, use the typed selection context, otherwise clear it
+		// const newSelectionContext = selectionContexts?.selectedShas.has(graphRow.sha)
+		// 	? selectionContexts.contexts.get(graphRow.type)
+		// 	: emptySelectionContext;
+
+		// setContext({
+		// 	...context,
+		// 	graph: {
+		// 		...(context?.graph != null && typeof context.graph === 'string'
+		// 			? JSON.parse(context.graph)
+		// 			: context?.graph),
+		// 		...newSelectionContext,
+		// 	},
+		// });
+	};
+
+	const computeSelectionContext = (_active: GraphRow, rows: GraphRow[]) => {
+		if (rows.length <= 1) {
+			setSelectionContexts(undefined);
+			return;
+		}
+
+		const selectedShas = new Set<string>();
+		for (const row of rows) {
+			selectedShas.add(row.sha);
+		}
+
+		// Group the selected rows by their type and only include ones that have row context
+		const grouped = groupByFilterMap(
+			rows,
+			r => r.type,
+			r =>
+				r.contexts?.row != null
+					? ((typeof r.contexts.row === 'string'
+							? JSON.parse(r.contexts.row)
+							: r.contexts.row) as GraphItemContext)
+					: undefined,
+		);
+
+		const contexts: SelectionContexts['contexts'] = new Map<CommitType, SelectionContext>();
+
+		for (let [type, items] of grouped) {
+			let webviewItems: string | undefined;
+
+			const contextValues = new Set<string>();
+			for (const item of items) {
+				contextValues.add(item.webviewItem);
+			}
+
+			if (contextValues.size === 1) {
+				webviewItems = first(contextValues);
+			} else if (contextValues.size > 1) {
+				// If there are multiple contexts, see if they can be boiled down into a least common denominator set
+				// Contexts are of the form `gitlens:<type>+<additional-context-1>+<additional-context-2>...`, <type> can also contain multiple `:`, but assume the whole thing is the type
+
+				const itemTypes = new Map<string, Map<string, number>>();
+
+				for (const context of contextValues) {
+					const [type, ...adds] = context.split('+');
+
+					let additionalContext = itemTypes.get(type);
+					if (additionalContext == null) {
+						additionalContext ??= new Map<string, number>();
+						itemTypes.set(type, additionalContext);
+					}
+
+					// If any item has no additional context, then only the type is able to be used
+					if (adds.length === 0) {
+						additionalContext.clear();
+						break;
+					}
+
+					for (const add of adds) {
+						additionalContext.set(add, (additionalContext.get(add) ?? 0) + 1);
+					}
+				}
+
+				if (itemTypes.size === 1) {
+					let additionalContext;
+					[webviewItems, additionalContext] = first(itemTypes)!;
+
+					if (additionalContext.size > 0) {
+						const commonContexts = join(
+							filterMap(additionalContext, ([context, count]) =>
+								count === items.length ? context : undefined,
+							),
+							'+',
+						);
+
+						if (commonContexts) {
+							webviewItems += `+${commonContexts}`;
+						}
+					}
+				} else {
+					// If we have more than one type, something is wrong with our context key setup -- should NOT happen at runtime
+					debugger;
+					webviewItems = undefined;
+					items = [];
+				}
+			}
+
+			const count = items.length;
+			contexts.set(type, {
+				listDoubleSelection: count === 2,
+				listMultiSelection: count > 1,
+				webviewItems: webviewItems,
+				webviewItemsValues: count > 1 ? items : undefined,
+			});
+		}
+
+		setSelectionContexts({ contexts: contexts, selectedShas: selectedShas });
+	};
+
+	const handleSelectGraphRows = (rows: GraphRow[]) => {
+		// hover.current?.hide();
+
+		// const active = rows[rows.length - 1];
+		// const activeKey = active != null ? `${active.sha}|${active.date}` : undefined;
+		// // HACK: Ensure the main state is updated since it doesn't come from the extension
+		// state.activeRow = activeKey;
+		// setActiveRow(activeKey);
+		// setActiveDay(active?.date);
+		// computeSelectionContext(active, rows);
+
+		props.onChangeSelection?.(rows);
+	};
+
+	return (
+		<GraphContainer
+			ref={graphRef}
+			avatarUrlByEmail={avatars}
+			columnsSettings={columns}
+			contexts={context}
+			// @ts-expect-error returnType of formatCommitMessage callback expects to be string, but it works fine with react element
+			formatCommitMessage={e => <GlMarkdown markdown={e}></GlMarkdown>}
+			cssVariables={theming?.cssVariables}
+			dimMergeCommits={config?.dimMergeCommits}
+			downstreamsByUpstream={downstreams}
+			enabledRefMetadataTypes={config?.enabledRefMetadataTypes}
+			enabledScrollMarkerTypes={config?.scrollMarkerTypes}
+			enableShowHideRefsOptions
+			enableMultiSelection={config?.enableMultiSelection}
+			excludeRefsById={excludeRefs}
+			excludeByType={excludeTypes}
+			formatCommitDateTime={getGraphDateFormatter(config)}
+			getExternalIcon={getIconElementLibrary}
+			graphRows={rows ?? emptyRows}
+			hasMoreCommits={paging?.hasMore}
+			// Just cast the { [id: string]: number } object to { [id: string]: boolean } for performance
+			// highlightedShas={searchResults?.ids as GraphContainerProps['highlightedShas']}
+			// highlightRowsOnRefHover={graphConfig?.highlightRowsOnRefHover}
+			includeOnlyRefsById={includeOnlyRefs}
+			scrollRowPadding={config?.scrollRowPadding}
+			showGhostRefsOnRowHover={config?.showGhostRefsOnRowHover}
+			showRemoteNamesOnRefs={config?.showRemoteNamesOnRefs}
+			isContainerWindowFocused={windowFocused}
+			isLoadingRows={loading}
+			isSelectedBySha={selectedRows}
+			nonce={nonce}
+			onColumnResized={handleOnColumnResized}
+			onDoubleClickGraphRow={handleOnDoubleClickRow}
+			onDoubleClickGraphRef={handleOnDoubleClickRef}
+			onGraphColumnsReOrdered={handleOnGraphColumnsReOrdered}
+			onGraphMouseLeave={handleOnGraphMouseLeave}
+			onGraphRowHovered={handleOnGraphRowHovered}
+			onGraphRowUnhovered={handleOnGraphRowUnhovered}
+			onRowContextMenu={handleRowContextMenu}
+			onSettingsClick={handleToggleColumnSettings}
+			onSelectGraphRows={handleSelectGraphRows}
+			onToggleRefsVisibilityClick={handleOnToggleRefsVisibilityClick}
+			onEmailsMissingAvatarUrls={handleMissingAvatars}
+			onRefsMissingMetadata={handleMissingRefsMetadata}
+			onShowMoreCommits={handleMoreCommits}
+			// onGraphVisibleRowsChanged={minimap.current ? handleOnGraphVisibleRowsChanged : undefined}
+			platform={clientPlatform}
+			refMetadataById={refsMetadata}
+			rowsStats={rowsStats}
+			rowsStatsLoading={rowsStatsLoading}
+			// searchMode={searchQuery?.filter ? 'filter' : 'normal'}
+			shaLength={config?.idLength}
+			shiftSelectMode="simple"
+			suppressNonRefRowTooltips
+			themeOpacityFactor={theming?.themeOpacityFactor}
+			useAuthorInitialsForAvatars={!config?.avatars}
+			workDirStats={workingTreeStats}
+		/>
+	);
+}
+
+// TODO to be removed
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export function GraphWrapper({
 	subscriber,
@@ -267,7 +806,7 @@ export function GraphWrapper({
 	onSearch,
 	onSearchPromise,
 	onSearchOpenInView,
-}: GraphWrapperProps) {
+}) {
 	const graphRef = useRef<GraphContainer>(null);
 
 	const [rows, setRows] = useState(state.rows ?? []);

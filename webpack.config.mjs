@@ -411,7 +411,7 @@ function getWebviewsConfig(mode, env) {
 		context: basePath,
 		entry: {
 			commitDetails: './commitDetails/commitDetails.ts',
-			graph: './plus/graph/graph.tsx',
+			graph: './plus/graph/graph.ts',
 			home: './home/home.ts',
 			rebase: './rebase/rebase.ts',
 			settings: './settings/settings.ts',
@@ -522,6 +522,37 @@ function getWebviewsConfig(mode, env) {
 				},
 				{
 					test: /\.scss$/,
+					resourceQuery: /lit/,
+
+					use: [
+						{
+							loader: path.resolve(__dirname, 'escape-lit-scss.js'),
+						},
+						{
+							loader: 'lit-scss-loader',
+							options: {
+								minify: false,
+							},
+						},
+						'extract-loader',
+						{
+							loader: 'css-loader',
+							options: {
+								sourceMap: mode !== 'production',
+								url: false,
+							},
+						},
+						{
+							loader: 'sass-loader',
+							options: {
+								sourceMap: mode !== 'production',
+							},
+						},
+					],
+				},
+				{
+					test: /\.scss$/,
+					resourceQuery: { not: [/lit/] },
 					use: [
 						{
 							loader: MiniCssExtractPlugin.loader,

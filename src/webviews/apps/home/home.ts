@@ -37,7 +37,7 @@ export class GlHomeApp extends GlApp<State> {
 
 	protected override createStateProvider(state: State, ipc: HostIpc) {
 		this.disposables.push((this._overviewState = new OverviewState(ipc)));
-
+		console.log('home initial state', state);
 		return new HomeStateProvider(this, state, ipc);
 	}
 
