@@ -1,12 +1,15 @@
 import type { CssVariables, GraphRef, GraphRow, GraphSearchMode } from '@gitkraken/gitkraken-components';
+import type GraphContainer from '@gitkraken/gitkraken-components';
 import { consume } from '@lit/context';
 import r2wc from '@r2wc/react-to-web-component';
-import type { CSSResultArray } from 'lit';
+import type { CSSResultArray, PropertyValues } from 'lit';
 import { css, html, LitElement } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { customElement, query } from 'lit/decorators.js';
 import { ifDefined } from 'lit/directives/if-defined.js';
+import { map } from 'lit/directives/map.js';
 import type { GitGraphRowType } from '../../../../git/models/graph';
 import { getCssVariable, mix, opacity } from '../../../../system/color';
+import { flatMap, flatten, forEach } from '../../../../system/iterable';
 import type {
 	GraphAvatars,
 	GraphColumnsConfig,
@@ -72,6 +75,7 @@ const WebGraph = r2wc(SafeGraphWrapper, {
 		rowsStats: 'json',
 		workingTreeStats: 'json',
 		paging: 'json',
+		setRef: 'function',
 	},
 
 	events: [
@@ -89,6 +93,7 @@ const WebGraph = r2wc(SafeGraphWrapper, {
 		'onSearch',
 		'onSearchPromise',
 		'onSearchOpenInView',
+		'onChangeVisibleDays',
 	],
 });
 
@@ -281,6 +286,24 @@ export class GLGraphWrapper extends LitElement {
 		// }
 	}
 
+	protected override updated(_changedProperties: PropertyValues): void {
+		forEach(_changedProperties.keys(), key => console.log('change', key));
+	}
+
+	@query('web-graph')
+	webGraph!: typeof WebGraph;
+
+	selectCommits(shaList: string[], includeToPrevSel: boolean, isAutoOrKeyScroll: boolean) {
+		console.log('webGraph', this.webGraph, shaList);
+		this.ref?.selectCommits(shaList, includeToPrevSel, isAutoOrKeyScroll);
+	}
+
+	onChangeVisibleDays(args) {
+		this.dispatchEvent(new CustomEvent('gl-graph-change-visible-days', { detail: args }));
+	}
+
+	private ref?: GraphContainer;
+
 	override render() {
 		console.log('graph state parent ', this._state.rows);
 
@@ -288,7 +311,7 @@ export class GLGraphWrapper extends LitElement {
 			.avatars=${this._state.avatars ?? {}}
 			.columns=${this._state.columns ?? {}}
 			.context=${this._state.context ?? {}}
-			.theming=${this.getGraphTheming() ?? {}}
+			.theming=${this._state.theming ?? {}}
 			.config=${this._state.config ?? {}}
 			.downstreams=${this._state.downstreams ?? {}}
 			.excludeRefs=${this._state.excludeRefs ?? {}}
@@ -302,7 +325,10 @@ export class GLGraphWrapper extends LitElement {
 			.refsMetadata=${this._state.refsMetadata ?? {}}
 			.rowsStats=${this._state.rowsStats ?? {}}
 			.workingTreeStats=${this._state.workingTreeStats ?? {}}
-			.paging=${this._state.paging}
+			.paging=${this._state.paging ?? {}}
+			.setRef=${(ref: GraphContainer) => {
+				this.ref = ref;
+			}}
 			@changecolumns=${$w(this.onColumnsChanged.bind(this))}
 			@changegraphconfiguration=${$w(this.onGraphConfigurationChanged.bind(this))}
 			@changegraphsearchmode=${$w(this.onGraphSearchModeChanged.bind(this))}
@@ -314,6 +340,7 @@ export class GLGraphWrapper extends LitElement {
 			@missingavatars=${$w(this.onGetMissingAvatars.bind(this))}
 			@missingrefsmetadata=${$w(this.onGetMissingRefsMetadata.bind(this))}
 			@morerows=${$w(this.onGetMoreRows.bind(this))}
+			@changevisibledays=${$w(this.onChangeVisibleDays.bind(this))}
 		></web-graph>`;
 	}
 }

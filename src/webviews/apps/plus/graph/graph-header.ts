@@ -309,7 +309,7 @@ export class GraphHeader extends LitElement {
 												.dateStyle=${this._state.config?.dateStyle}
 												details
 												@gl-issue-pull-request-details=${() => {
-													debugger;
+													this.onOpenPullRequest(pr);
 												}}
 											>
 											</issue-pull-request>
@@ -363,7 +363,7 @@ export class GraphHeader extends LitElement {
 								<code-icon icon="chevron-right"></code-icon>
 							</span>
 							<gl-git-actions-buttons
-								branchName=${this._state.branch!.name}
+								.branchName=${this._state.branch?.name}
 								.branchState=${this._state.branchState}
 								.lastFetched=${this._state.lastFetched}
 								.state=${this._state}

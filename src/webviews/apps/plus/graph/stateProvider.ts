@@ -1,3 +1,4 @@
+import type { CssVariables } from '@gitkraken/gitkraken-components';
 import { ContextProvider } from '@lit/context';
 import type { ReactiveControllerHost } from 'lit';
 import { DidChangeNotification } from '../../../commitDetails/protocol';
@@ -35,6 +36,12 @@ export class GraphStateProvider implements StateProvider<State> {
 	private readonly _state: State;
 	get state() {
 		return this._state;
+	}
+
+	applyTheme(theme: { cssVariables: CssVariables; themeOpacityFactor: number }) {
+		console.log('apply theme', theme);
+		this._state.theming = theme;
+		this.provider.setValue(this._state, true);
 	}
 
 	constructor(

@@ -11,7 +11,7 @@ import { ipcContext, LoggerContext, loggerContext, telemetryContext, TelemetryCo
 import type { Disposable } from './events';
 import { HostIpc } from './ipc';
 import type { ThemeChangeEvent } from './theme';
-import { computeThemeColors, onDidChangeTheme } from './theme';
+import { computeThemeColors, onDidChangeTheme, watchThemeColors } from './theme';
 
 export interface StateProvider<State> extends Disposable {
 	readonly state: State;
@@ -74,6 +74,7 @@ export abstract class GlApp<
 		const themeEvent = computeThemeColors();
 		if (this.onThemeUpdated != null) {
 			this.onThemeUpdated(themeEvent);
+			this.disposables.push(watchThemeColors());
 			this.disposables.push(onDidChangeTheme(this.onThemeUpdated, this));
 		}
 

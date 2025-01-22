@@ -17,7 +17,7 @@ import type { SlChangeEvent } from '@shoelace-style/shoelace';
 import SlOption from '@shoelace-style/shoelace/dist/react/option/index.js';
 import SlSelect from '@shoelace-style/shoelace/dist/react/select/index.js';
 import type { FormEvent, MouseEvent } from 'react';
-import React, { createElement, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getPlatform } from '@env/platform';
 import type { ConnectCloudIntegrationsCommandArgs } from '../../../../commands/cloudIntegrations';
 import type { BranchGitCommandArgs } from '../../../../commands/git/branch';
@@ -97,8 +97,6 @@ import { GlMergeConflictWarning } from '../shared/components/merge-rebase-status
 import { GitActionsButtons } from './actions/gitActionsButtons';
 import { GlGraphHover } from './hover/graphHover.react';
 import type { GraphMinimapDaySelectedEventDetail } from './minimap/minimap';
-import { GlGraphMinimapContainer } from './minimap/minimap-container.react';
-import { GlGraphSideBar } from './sidebar/sidebar.react';
 
 function getRemoteIcon(type: string | number) {
 	switch (type) {
@@ -126,6 +124,7 @@ export interface GraphWrapperProps {
 	onMissingRefsMetadata?: (metadata: GraphMissingRefsMetadata) => void;
 	onMoreRows?: (id?: string) => void;
 	onSearch?: (search: SearchQuery | undefined, options?: { limit?: number }) => void;
+	onChangeVisibleDays?: (args: any) => void;
 	onSearchPromise?: (
 		search: SearchQuery,
 		options?: { limit?: number; more?: boolean },
@@ -233,9 +232,13 @@ const emptySelectionContext: SelectionContext = {
 	webviewItemsValues: undefined,
 };
 
+interface GraphWrapperAPI {
+	setRef: (refObject: GraphContainer) => void;
+}
+
 const emptyRows: GraphRow[] = [];
 // eslint-disable-next-line @typescript-eslint/naming-convention
-export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps>) {
+export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps & GraphWrapperAPI>) {
 	const {
 		activeRow,
 		avatars,
@@ -257,14 +260,22 @@ export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps>) {
 		rowsStats,
 		rowsStatsLoading,
 		workingTreeStats,
+		setRef,
 		onDoubleClickRef,
 		onDoubleClickRow,
 		onChangeGraphConfiguration,
 		onSearch,
+		onChangeVisibleDays,
 		onSearchOpenInView,
 	} = props;
-	const graphRef = useRef<GraphContainer>(null);
-	console.log('graph state', props.rows);
+	const [graph, _graphRef] = useState<GraphContainer | null>(null);
+	const graphRef = useCallback(
+		(graph: GraphContainer) => {
+			_graphRef(graph);
+			setRef(graph);
+		},
+		[setRef],
+	);
 
 	const handleKeyDown = (e: KeyboardEvent) => {
 		if (e.key === 'Enter' || e.key === ' ') {
@@ -272,8 +283,8 @@ export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps>) {
 			if (sha == null) return;
 
 			// TODO@eamodio a bit of a hack since the graph container ref isn't exposed in the types
-			const graph = (graphRef.current as any)?.graphContainerRef.current;
-			if (!e.composedPath().some(el => el === graph)) return;
+			const _graph = (graph as any)?.graphContainerRef.current;
+			if (!e.composedPath().some(el => el === _graph)) return;
 
 			const row = rows.find(r => r.sha === sha);
 			if (row == null) return;
@@ -303,7 +314,7 @@ export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps>) {
 			sha = closest.sha;
 		}
 
-		graphRef.current?.selectCommits([sha], false, true);
+		graph?.selectCommits([sha], false, true);
 
 		queueMicrotask(
 			() =>
@@ -530,10 +541,10 @@ export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps>) {
 	};
 
 	const handleOnGraphVisibleRowsChanged = (top: GraphRow, bottom: GraphRow) => {
-		// setVisibleDays({
-		// 	top: new Date(top.date).setHours(23, 59, 59, 999),
-		// 	bottom: new Date(bottom.date).setHours(0, 0, 0, 0),
-		// });
+		props.onChangeVisibleDays?.({
+			top: new Date(top.date).setHours(23, 59, 59, 999),
+			bottom: new Date(bottom.date).setHours(0, 0, 0, 0),
+		});
 	};
 
 	const handleOnGraphColumnsReOrdered = (columnsSettings: GraphColumnsSettings) => {
@@ -764,7 +775,7 @@ export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps>) {
 			onEmailsMissingAvatarUrls={handleMissingAvatars}
 			onRefsMissingMetadata={handleMissingRefsMetadata}
 			onShowMoreCommits={handleMoreCommits}
-			// onGraphVisibleRowsChanged={minimap.current ? handleOnGraphVisibleRowsChanged : undefined}
+			onGraphVisibleRowsChanged={handleOnGraphVisibleRowsChanged}
 			platform={clientPlatform}
 			refMetadataById={refsMetadata}
 			rowsStats={rowsStats}
