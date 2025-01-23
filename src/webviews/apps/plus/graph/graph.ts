@@ -50,9 +50,15 @@ import './graph-header';
 import './graph.scss';
 import { stateContext } from './context';
 import graphStyles from './graph.scss?lit';
-import { GraphStateProvider } from './stateProvider';
+import {
+	GraphAppState,
+	GraphSearchingState,
+	graphSearchStateContext,
+	graphStateContext,
+	GraphStateProvider,
+} from './stateProvider';
 import type { CustomEventType } from '../../shared/components/element';
-import { consume } from '@lit/context';
+import { consume, provide } from '@lit/context';
 import './sidebar/sidebar';
 import './minimap/minimap-container';
 import './graph-app';
@@ -81,19 +87,19 @@ export class GraphApp extends GlApp<State> {
 
 		return Object.values(this.state.excludeTypes).includes(true);
 	}
-	private _temporaryTheme: { cssVariables: CssVariables; themeOpacityFactor: number } | undefined;
 	private applyTheme(theme: { cssVariables: CssVariables; themeOpacityFactor: number }) {
-		// save value until applyTheme is overridden
-		this._temporaryTheme = theme;
+		this._graphState.theming = theme;
 	}
 
+	@provide({ context: graphSearchStateContext })
+	private _graphSearchState?: typeof graphSearchStateContext.__context__;
+
+	@provide({ context: graphStateContext })
+	private readonly _graphState: typeof graphStateContext.__context__ = new GraphAppState();
+
 	protected override createStateProvider(state: State, ipc: HostIpc): StateProvider<State> {
-		const provider = new GraphStateProvider(this, state, ipc);
-		this.applyTheme = provider.applyTheme.bind(provider);
-		if (this._temporaryTheme) {
-			this.applyTheme(this._temporaryTheme);
-		}
-		return provider;
+		this._graphSearchState = new GraphSearchingState(ipc);
+		return new GraphStateProvider(this, state, ipc);
 	}
 
 	static override styles = [

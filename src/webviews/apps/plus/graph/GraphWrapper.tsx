@@ -97,6 +97,7 @@ import { GlMergeConflictWarning } from '../shared/components/merge-rebase-status
 import { GitActionsButtons } from './actions/gitActionsButtons';
 import { GlGraphHover } from './hover/graphHover.react';
 import type { GraphMinimapDaySelectedEventDetail } from './minimap/minimap';
+import type { GraphAppState } from './stateProvider';
 
 function getRemoteIcon(type: string | number) {
 	switch (type) {
@@ -238,7 +239,7 @@ interface GraphWrapperAPI {
 
 const emptyRows: GraphRow[] = [];
 // eslint-disable-next-line @typescript-eslint/naming-convention
-export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps & GraphWrapperAPI>) {
+export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps & GraphWrapperAPI & GraphAppState>) {
 	const {
 		activeRow,
 		avatars,
@@ -620,7 +621,7 @@ export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps & Gra
 
 	const computeSelectionContext = (_active: GraphRow, rows: GraphRow[]) => {
 		if (rows.length <= 1) {
-			setSelectionContexts(undefined);
+			// setSelectionContexts(undefined);
 			return;
 		}
 
@@ -712,19 +713,19 @@ export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps & Gra
 			});
 		}
 
-		setSelectionContexts({ contexts: contexts, selectedShas: selectedShas });
+		// setSelectionContexts({ contexts: contexts, selectedShas: selectedShas });
 	};
 
 	const handleSelectGraphRows = (rows: GraphRow[]) => {
 		// hover.current?.hide();
 
-		// const active = rows[rows.length - 1];
+		const active = rows[rows.length - 1];
 		// const activeKey = active != null ? `${active.sha}|${active.date}` : undefined;
 		// // HACK: Ensure the main state is updated since it doesn't come from the extension
 		// state.activeRow = activeKey;
 		// setActiveRow(activeKey);
 		// setActiveDay(active?.date);
-		// computeSelectionContext(active, rows);
+		computeSelectionContext(active, rows);
 
 		props.onChangeSelection?.(rows);
 	};

@@ -1,12 +1,14 @@
+/*global document window*/
 import type { GraphRefOptData } from '@gitkraken/gitkraken-components';
+import { consume } from '@lit/context';
+import { SignalWatcher } from '@lit-labs/signals';
+import '@shoelace-style/shoelace/dist/components/option/option.component.js';
+import '@shoelace-style/shoelace/dist/components/select/select.component.js';
 import { css, html, LitElement, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { ifDefined } from 'lit/directives/if-defined.js';
 import { repeat } from 'lit/directives/repeat.js';
 import { when } from 'lit/directives/when.js';
-/*global document window*/
-import '@shoelace-style/shoelace/dist/components/select/select.component.js';
-import '@shoelace-style/shoelace/dist/components/option/option.component.js';
 import type { ConnectCloudIntegrationsCommandArgs } from '../../../../commands/cloudIntegrations';
 import type { BranchGitCommandArgs } from '../../../../commands/git/branch';
 import type { GraphBranchesVisibility } from '../../../../config';
@@ -14,8 +16,8 @@ import { GlCommand } from '../../../../constants.commands';
 import type { SearchQuery } from '../../../../constants.search';
 import { isSubscriptionPaid } from '../../../../plus/gk/utils/subscription.utils';
 import type { LaunchpadCommandArgs } from '../../../../plus/launchpad/launchpad';
-import { Color } from '../../../../system/color';
 import { createCommandLink } from '../../../../system/commands';
+import { debounce } from '../../../../system/function';
 import { createWebviewCommandLink } from '../../../../system/webview';
 import type {
 	GraphExcludedRef,
@@ -27,50 +29,49 @@ import type {
 import {
 	OpenPullRequestDetailsCommand,
 	SearchOpenInViewCommand,
+	SearchRequest,
 	UpdateExcludeTypesCommand,
+	UpdateGraphConfigurationCommand,
 	UpdateIncludedRefsCommand,
 	UpdateRefsVisibilityCommand,
 } from '../../../plus/graph/protocol';
-import type { StateProvider } from '../../shared/app';
-import { GlApp } from '../../shared/app';
 import '../../shared/components/branch-icon';
 import '../../shared/components/button';
 import '../../shared/components/code-icon';
+import type { CustomEventType } from '../../shared/components/element';
 import '../../shared/components/menu';
 import '../../shared/components/overlays/popover';
 import '../../shared/components/overlays/tooltip';
 import '../../shared/components/rich/issue-pull-request';
-import type { HostIpc } from '../../shared/ipc';
+import { ipcContext } from '../../shared/context';
 import { emitTelemetrySentEvent } from '../../shared/telemetry';
-import type { ThemeChangeEvent } from '../../shared/theme';
 import '../shared/components/merge-rebase-status';
 import './actions/gitActionsButtons.wc';
+import { stateContext } from './context';
 import './graph-wrapper';
 import './graph.scss';
-import { stateContext } from './context';
 import graphStyles from './graph.scss?lit';
-import { GraphStateProvider } from './stateProvider';
-import type { CustomEventType } from '../../shared/components/element';
-import { consume } from '@lit/context';
-import { ipcContext } from '../../shared/context';
+import type { GraphSearchingState } from './stateProvider';
+import { graphSearchStateContext, graphStateContext } from './stateProvider';
+import type { SearchNavigationEventDetail } from '../../shared/components/search/search-input';
 
-function getSearchResultModel(state: State): {
-	results: GraphSearchResults | undefined;
-	resultsError: GraphSearchResultsError | undefined;
+function getSearchResultModel(state: GraphSearchingState['state']): {
+	results: undefined | GraphSearchResults;
+	resultsError: undefined | GraphSearchResultsError;
 } {
-	let results: GraphSearchResults | undefined;
-	let resultsError: GraphSearchResultsError | undefined;
-	if (state.searchResults != null) {
-		if ('error' in state.searchResults) {
-			resultsError = state.searchResults;
+	let results: undefined | GraphSearchResults;
+	let resultsError: undefined | GraphSearchResultsError;
+	if (state?.results != null) {
+		if ('error' in state.results) {
+			resultsError = state.results;
 		} else {
-			results = state.searchResults;
+			results = state.results;
 		}
 	}
 	return { results: results, resultsError: resultsError };
 }
 
-function getRemoteIcon(type: string | number) {
+function getRemoteIcon(type: number | string) {
 	switch (type) {
 		case 'head':
 			return 'vm';
@@ -83,47 +84,26 @@ function getRemoteIcon(type: string | number) {
 	}
 }
 
-const graphLaneThemeColors = new Map([
-	['--vscode-gitlens-graphLane1Color', '#15a0bf'],
-	['--vscode-gitlens-graphLane2Color', '#0669f7'],
-	['--vscode-gitlens-graphLane3Color', '#8e00c2'],
-	['--vscode-gitlens-graphLane4Color', '#c517b6'],
-	['--vscode-gitlens-graphLane5Color', '#d90171'],
-	['--vscode-gitlens-graphLane6Color', '#cd0101'],
-	['--vscode-gitlens-graphLane7Color', '#f25d2e'],
-	['--vscode-gitlens-graphLane8Color', '#f2ca33'],
-	['--vscode-gitlens-graphLane9Color', '#7bd938'],
-	['--vscode-gitlens-graphLane10Color', '#2ece9d'],
-]);
-
 @customElement('gl-graph-header')
-export class GraphHeader extends LitElement {
+export class GraphHeader extends SignalWatcher(LitElement) {
 	static override styles = [graphStyles];
-
-	@state()
-	searching: string = '';
-	searchResultsHidden: unknown;
 
 	@consume({ context: ipcContext, subscribe: true })
 	_ipc!: typeof ipcContext.__context__;
 
 	@consume({ context: stateContext, subscribe: true })
-	_state!: typeof stateContext.__context__;
+	state!: typeof stateContext.__context__;
+
+	@consume({ context: graphStateContext })
+	appState!: typeof graphStateContext.__context__;
 
 	get hasFilters() {
-		if (this._state.config?.onlyFollowFirstParent) return true;
-		if (this._state.excludeTypes == null) return false;
+		if (this.state.config?.onlyFollowFirstParent) return true;
+		if (this.state.excludeTypes == null) return false;
 
-		return Object.values(this._state.excludeTypes).includes(true);
+		return Object.values(this.state.excludeTypes).includes(true);
 	}
 	private handleJumpToRef() {}
-	// private override get state() {
-	// 	return this._state;
-	// }
-
-	// protected override createRenderRoot(): HTMLElement | DocumentFragment {
-	// 	return this;
-	// }
 
 	private onRefsVisibilityChanged(refs: GraphExcludedRef[], visible: boolean) {
 		this._ipc.sendCommand(UpdateRefsVisibilityCommand, {
@@ -148,8 +128,125 @@ export class GraphHeader extends LitElement {
 		this._ipc.sendCommand(UpdateIncludedRefsCommand, { branchesVisibility: branchesVisibility, refs: refs });
 	}
 
+	private get searchResults() {
+		return getSearchResultModel(this.graphSearchingState.state).results;
+	}
+	private get searchResultsError() {
+		return getSearchResultModel(this.graphSearchingState.state).resultsError;
+	}
+
+	private getActiveRowInfo(): undefined | { date: number; id: string } {
+		if (this.appState.activeRow == null) return undefined;
+
+		const [id, date] = this.appState.activeRow.split('|');
+		return {
+			date: Number(date),
+			id: id,
+		};
+	}
+
+	private getNextOrPreviousSearchResultIndex(
+		index: number,
+		next: boolean,
+		results: GraphSearchResults,
+		query: undefined | SearchQuery,
+	) {
+		if (next) {
+			if (index < results.count - 1) {
+				index++;
+			} else if (query != null && results?.paging?.hasMore) {
+				index = -1; // Indicates a boundary that we should load more results
+			} else {
+				index = 0;
+			}
+		} else if (index > 0) {
+			index--;
+		} else if (query != null && results?.paging?.hasMore) {
+			index = -1; // Indicates a boundary that we should load more results
+		} else {
+			index = results.count - 1;
+		}
+		return index;
+	}
+
+	@consume({ context: graphSearchStateContext })
+	private graphSearchingState!: typeof graphSearchStateContext.__context__;
+
+	private getClosestSearchResultIndex(
+		results: GraphSearchResults,
+		query: undefined | SearchQuery,
+		activeRow: undefined | string,
+		next: boolean = true,
+	): [number, undefined | string] {
+		if (results.ids == null) return [0, undefined];
+
+		const activeInfo = this.getActiveRowInfo();
+		const activeId = activeInfo?.id;
+		if (activeId == null) return [0, undefined];
+
+		let index: undefined | number;
+		let nearestId: undefined | string;
+		let nearestIndex: undefined | number;
+
+		const data = results.ids[activeId];
+		if (data != null) {
+			index = data.i;
+			nearestId = activeId;
+			nearestIndex = index;
+		}
+
+		if (index == null) {
+			const activeDate = activeInfo?.date != null ? activeInfo.date + (next ? 1 : -1) : undefined;
+			if (activeDate == null) return [0, undefined];
+
+			// Loop through the search results and:
+			//  try to find the active id
+			//  if next=true find the nearest date before the active date
+			//  if next=false find the nearest date after the active date
+
+			let i: number;
+			let id: string;
+			let date: number;
+			let nearestDate: undefined | number;
+			for ([id, { date, i }] of Object.entries(results.ids)) {
+				if (next) {
+					if (date < activeDate && (nearestDate == null || date > nearestDate)) {
+						nearestId = id;
+						nearestDate = date;
+						nearestIndex = i;
+					}
+				} else if (date > activeDate && (nearestDate == null || date <= nearestDate)) {
+					nearestId = id;
+					nearestDate = date;
+					nearestIndex = i;
+				}
+			}
+
+			index = nearestIndex == null ? results.count - 1 : nearestIndex + (next ? -1 : 1);
+		}
+
+		index = this.getNextOrPreviousSearchResultIndex(index, next, results, query);
+
+		return index === nearestIndex ? [index, nearestId] : [index, undefined];
+	}
+
+	private get searchPosition(): number {
+		if (this.searchResults?.ids == null || !this.graphSearchingState.filter.query) return 0;
+
+		const id = this.getActiveRowInfo()?.id;
+		let searchIndex = id ? this.searchResults.ids[id]?.i : undefined;
+		if (searchIndex == null) {
+			[searchIndex] = this.getClosestSearchResultIndex(
+				this.searchResults,
+				this.graphSearchingState.filter,
+				this.appState.activeRow,
+			);
+		}
+		return searchIndex < 1 ? 1 : searchIndex + 1;
+	}
+
 	override render() {
-		const repo = this._state.repositories?.find(repo => repo.id === this._state.selectedRepository);
+		const repo = this.state.repositories?.find(repo => repo.id === this.state.selectedRepository);
 		return html`<header class="titlebar graph-app__header">
 			<div class="titlebar__row titlebar__row--wrap">
 				<div class="titlebar__group">
@@ -181,7 +278,7 @@ export class GraphHeader extends LitElement {
 											repo!.provider!.integration?.connected,
 											() =>
 												html` <gl-indicator
-													.style=${css`
+													.style=${`
 														margin-left: -0.2rem;
 														--gl-indicator-color: green;
 														--gl-indicator-size: 0.4rem;
@@ -262,12 +359,12 @@ export class GraphHeader extends LitElement {
 							type="button"
 							class="action-button"
 							aria-label="Switch to Another Repository..."
-							?disabled=${!this._state.repositories || this._state.repositories.length < 2}
-							onClick=${() => this.handleChooseRepository()}
+							?disabled=${!this.state.repositories || this.state.repositories.length < 2}
+							@click=${() => this.handleChooseRepository()}
 						>
 							<span class="action-button__truncated"> ${repo?.formattedName ?? 'none selected'} </span>
 							${when(
-								this._state.repositories && this._state.repositories.length > 1,
+								this.state.repositories && this.state.repositories.length > 1,
 								() => html`
 									<code-icon
 										class="action-button__more"
@@ -280,13 +377,13 @@ export class GraphHeader extends LitElement {
 						<span slot="content">Switch to Another Repository...</span>
 					</gl-tooltip>
 					${when(
-						this._state.allowed && repo,
+						this.state.allowed && repo,
 						() => html`
 							<span>
 								<code-icon icon="chevron-right"></code-icon>
 							</span>
 							${when(
-								this._state.branchState?.pr,
+								this.state.branchState?.pr,
 								pr => html`
 									<gl-popover placement="bottom">
 										<button slot="anchor" type="button" class="action-button">
@@ -305,8 +402,8 @@ export class GraphHeader extends LitElement {
 												identifier=${`#${pr.id}`}
 												status=${pr.state}
 												.date=${pr.updatedDate}
-												.dateFormat=${this._state.config?.dateFormat}
-												.dateStyle=${this._state.config?.dateStyle}
+												.dateFormat=${this.state.config?.dateFormat}
+												.dateStyle=${this.state.config?.dateStyle}
 												details
 												@gl-issue-pull-request-details=${() => {
 													this.onOpenPullRequest(pr);
@@ -322,15 +419,15 @@ export class GraphHeader extends LitElement {
 									slot="anchor"
 									href=${createWebviewCommandLink(
 										'gitlens.graph.switchToAnotherBranch',
-										this._state.webviewId,
-										this._state.webviewInstanceId,
+										this.state.webviewId,
+										this.state.webviewInstanceId,
 									)}
 									class="action-button"
-									style=${this._state.branchState?.pr ? { marginLeft: '-0.6rem' } : {}}
+									style=${this.state.branchState?.pr ? { marginLeft: '-0.6rem' } : {}}
 									aria-label="Switch to Another Branch..."
 								>
 									${this.renderBranchStateIcon()}
-									<span class="action-button__truncated">${this._state.branch?.name}</span>
+									<span class="action-button__truncated">${this.state.branch?.name}</span>
 									<code-icon
 										class="action-button__more"
 										icon="chevron-down"
@@ -342,8 +439,8 @@ export class GraphHeader extends LitElement {
 										Switch to Another Branch...
 										<hr />
 										<code-icon icon="git-branch" aria-hidden="true"></code-icon>
-										<span class="md-code">${this._state.branch?.name}</span>
-										${when(this._state.branchState?.worktree, () => html`<i> (in a worktree)</i> `)}
+										<span class="md-code">${this.state.branch?.name}</span>
+										${when(this.state.branchState?.worktree, () => html`<i> (in a worktree)</i> `)}
 									</span>
 								</div>
 							</gl-popover>
@@ -363,10 +460,10 @@ export class GraphHeader extends LitElement {
 								<code-icon icon="chevron-right"></code-icon>
 							</span>
 							<gl-git-actions-buttons
-								.branchName=${this._state.branch?.name}
-								.branchState=${this._state.branchState}
-								.lastFetched=${this._state.lastFetched}
-								.state=${this._state}
+								.branchName=${this.state.branch?.name}
+								.branchState=${this.state.branchState}
+								.lastFetched=${this.state.lastFetched}
+								.state=${this.state}
 							></gl-git-actions-buttons>
 						`,
 					)}
@@ -378,7 +475,7 @@ export class GraphHeader extends LitElement {
 							href=${createCommandLink<BranchGitCommandArgs>(GlCommand.GitCommandsBranch, {
 								state: {
 									subcommand: 'create',
-									reference: this._state.branch,
+									reference: this.state.branch,
 								},
 								command: 'branch',
 								confirm: true,
@@ -389,7 +486,7 @@ export class GraphHeader extends LitElement {
 						<span slot="content">
 							Create New Branch from
 							<code-icon icon="git-branch"></code-icon>
-							<span class="md-code">${this._state.branch?.name}</span>
+							<span class="md-code">${this.state.branch?.name}</span>
 						</span>
 					</gl-tooltip>
 					<gl-tooltip placement="bottom">
@@ -430,11 +527,11 @@ export class GraphHeader extends LitElement {
 						</span>
 					</gl-tooltip>
 					${when(
-						this._state.subscription == null || !isSubscriptionPaid(this._state.subscription),
+						this.state.subscription == null || !isSubscriptionPaid(this.state.subscription),
 						() => html`
 							<gl-feature-badge
 								.source=${{ source: 'graph', detail: 'badge' } as const}
-								.subscription=${this._state.subscription}
+								.subscription=${this.state.subscription}
 							></gl-feature-badge>
 						`,
 					)}
@@ -442,35 +539,35 @@ export class GraphHeader extends LitElement {
 			</div>
 
 			${when(
-				this._state.allowed &&
-					this._state.workingTreeStats != null &&
-					(this._state.workingTreeStats.hasConflicts || this._state.workingTreeStats.pausedOpStatus),
+				this.state.allowed &&
+					this.state.workingTreeStats != null &&
+					(this.state.workingTreeStats.hasConflicts || this.state.workingTreeStats.pausedOpStatus),
 				() => html`
 					<div class="merge-conflict-warning">
 						<gl-merge-rebase-status
 							class="merge-conflict-warning__content"
-							?conflicts=${this._state.workingTreeStats?.hasConflicts}
-							.pausedOpStatus=${this._state.workingTreeStats?.pausedOpStatus}
+							?conflicts=${this.state.workingTreeStats?.hasConflicts}
+							.pausedOpStatus=${this.state.workingTreeStats?.pausedOpStatus}
 							skipCommand="gitlens.graph.skipPausedOperation"
 							continueCommand="gitlens.graph.continuePausedOperation"
 							abortCommand="gitlens.graph.abortPausedOperation"
 							openEditorCommand="gitlens.graph.openRebaseEditor"
 							.webviewCommandContext=${{
-								webview: this._state.webviewId,
-								webviewInstance: this._state.webviewInstanceId,
+								webview: this.state.webviewId,
+								webviewInstance: this.state.webviewInstanceId,
 							}}
 						></gl-merge-rebase-status>
 					</div>
 				`,
 			)}
 			${when(
-				this._state.allowed,
+				this.state.allowed,
 				() => html`
 					<div class="titlebar__row">
 						<div class="titlebar__group">
 							<gl-tooltip placement="top" content="Branches Visibility">
 								<sl-select
-									value=${ifDefined(this._state.branchesVisibility)}
+									value=${ifDefined(this.state.branchesVisibility)}
 									onSlChange=${() => this.handleBranchesVisibility()}
 									hoist
 								>
@@ -500,7 +597,7 @@ export class GraphHeader extends LitElement {
 									<sl-option value="current">Current Branch</sl-option>
 								</sl-select>
 							</gl-tooltip>
-							<div class=${`shrink ${!Object.values(this._state.excludeRefs ?? {}).length && 'hidden'}`}>
+							<div class=${`shrink ${!Object.values(this.state.excludeRefs ?? {}).length && 'hidden'}`}>
 								<gl-popover
 									class="popover"
 									placement="bottom-start"
@@ -511,7 +608,7 @@ export class GraphHeader extends LitElement {
 									<gl-tooltip placement="top" slot="anchor">
 										<button type="button" id="hiddenRefs" class="action-button">
 											<code-icon icon=${`eye-closed`}></code-icon>
-											${Object.values(this._state.excludeRefs ?? {}).length}
+											${Object.values(this.state.excludeRefs ?? {}).length}
 											<code-icon
 												class="action-button__more"
 												icon="chevron-down"
@@ -522,7 +619,7 @@ export class GraphHeader extends LitElement {
 									</gl-tooltip>
 									<div slot="content">
 										<menu-label>Hidden Branches / Tags</menu-label>
-										${when(this._state.excludeRefs, excludeRefs => {
+										${when(this.state.excludeRefs, excludeRefs => {
 											if (!Object.keys(excludeRefs).length) {
 												return nothing;
 											}
@@ -585,7 +682,7 @@ export class GraphHeader extends LitElement {
 													<gl-checkbox
 														value="onlyFollowFirstParent"
 														onChange=${() => this.handleFilterChange()}
-														checked=${this._state.config?.onlyFollowFirstParent ?? false}
+														checked=${this.state.config?.onlyFollowFirstParent ?? false}
 													>
 														Simplify Merge History
 													</gl-checkbox>
@@ -596,7 +693,7 @@ export class GraphHeader extends LitElement {
 												<gl-checkbox
 													value="remotes"
 													onChange=${this.handleFilterChange}
-													?checked=${this._state.excludeTypes?.remotes ?? false}
+													?checked=${this.state.excludeTypes?.remotes ?? false}
 												>
 													Hide Remote-only Branches
 												</gl-checkbox>
@@ -605,7 +702,7 @@ export class GraphHeader extends LitElement {
 												<gl-checkbox
 													value="stashes"
 													onChange=${this.handleFilterChange}
-													?checked=${this._state.excludeTypes?.stashes ?? false}
+													?checked=${this.state.excludeTypes?.stashes ?? false}
 												>
 													Hide Stashes
 												</gl-checkbox>
@@ -616,7 +713,7 @@ export class GraphHeader extends LitElement {
 										<gl-checkbox
 											value="tags"
 											onChange=${this.handleFilterChange}
-											?checked=${this._state.excludeTypes?.tags ?? false}
+											?checked=${this.state.excludeTypes?.tags ?? false}
 										>
 											Hide Tags
 										</gl-checkbox>
@@ -626,7 +723,7 @@ export class GraphHeader extends LitElement {
 										<gl-checkbox
 											value="mergeCommits"
 											onChange=${this.handleFilterChange}
-											checked=${this._state.config?.dimMergeCommits ?? false}
+											checked=${this.state.config?.dimMergeCommits ?? false}
 										>
 											Dim Merge Commit Rows
 										</gl-checkbox>
@@ -636,22 +733,23 @@ export class GraphHeader extends LitElement {
 							<span>
 								<span class="action-divider"></span>
 							</span>
-							<!-- <gl-search-box
-								step={searchPosition}
-								total={searchResults?.count ?? 0}
-								valid={Boolean(searchQuery?.query && searchQuery.query.length > 2)}
-								more={searchResults?.paging?.hasMore ?? false}
-								searching={this.searching}
-								?filter={this._state.defaultSearchMode === 'filter'}
-								value={searchQuery?.query ?? ''}
-								errorMessage={getSearchResultModel(this._state).resultsError?.error ?? ''}
-								?resultsHidden={this.searchResultsHidden}
-								?resultsLoaded={this._state.searchResults != null}
-								@gl-search-inputchange={(e: CustomEventType<'gl-search-inputchange'>) => this.handleSearchInput(e)}
-								@gl-search-navigate={(e: CustomEventType<'gl-search-navigate'>) => this.handleSearchNavigation(e)}
-								@gl-search-openinview={() => this.onSearchOpenInView()}
-								@gl-search-modechange={(e: CustomEventType<'gl-search-modechange'>) => this.handleSearchModeChange(e)}
-							></gl-search-box> -->
+							<gl-search-box
+								step=${this.searchPosition}
+								total=${this.searchResults?.count ?? 0}
+								valid=${Boolean(this.graphSearchingState.valid)}
+								?more=${this.searchResults?.paging?.hasMore ?? false}
+								?searching=${this.graphSearchingState.loading}
+								?filter=${this.state.defaultSearchMode === 'filter'}
+								value=${this.graphSearchingState.filter.query}
+								errorMessage=${this.searchResultsError?.error ?? ''}
+								?resultsHidden=${this.graphSearchingState.searchResultsHidden}
+								?resultsLoaded=${this.searchResults != null}
+								@gl-search-inputchange=${(e: CustomEventType<'gl-search-inputchange'>) =>
+									this.handleSearchInput(e)}
+								@gl-search-navigate=${this.handleSearchNavigation}
+								@gl-search-openinview=${() => this.onSearchOpenInView()}
+								@gl-search-modechange=${this.handleSearchModeChange}
+							></gl-search-box>
 							<span>
 								<span class="action-divider"></span>
 							</span>
@@ -662,8 +760,8 @@ export class GraphHeader extends LitElement {
 										role="checkbox"
 										class="action-button"
 										aria-label="Toggle Minimap"
-										aria-checked=${this._state.config?.minimap ?? false}
-										onClick=${() => this.handleOnMinimapToggle()}
+										aria-checked=${this.state.config?.minimap ?? false}
+										@click=${() => this.handleOnMinimapToggle()}
 									>
 										<code-icon class="action-button__icon" icon="graph-line"></code-icon>
 									</button>
@@ -690,7 +788,7 @@ export class GraphHeader extends LitElement {
 										<menu-label>Minimap</menu-label>
 										<menu-item role="none">
 											<gl-radioGroup
-												value=${this._state.config?.minimapDataType ?? 'commits'}
+												value=${this.state.config?.minimapDataType ?? 'commits'}
 												onChange=${() => this.handleOnMinimapDataTypeChange()}
 											>
 												<gl-radio name="minimap-datatype" value="commits"> Commits </gl-radio>
@@ -705,7 +803,7 @@ export class GraphHeader extends LitElement {
 											<gl-checkbox
 												value="localBranches"
 												onChange=${() => this.handleOnMinimapAdditionalTypesChange()}
-												?checked=${this._state.config?.minimapMarkerTypes?.includes(
+												?checked=${this.state.config?.minimapMarkerTypes?.includes(
 													'localBranches',
 												) ?? false}
 											>
@@ -717,7 +815,7 @@ export class GraphHeader extends LitElement {
 											<gl-checkbox
 												value="remoteBranches"
 												onChange=${() => this.handleOnMinimapAdditionalTypesChange()}
-												?checked=${this._state.config?.minimapMarkerTypes?.includes(
+												?checked=${this.state.config?.minimapMarkerTypes?.includes(
 													'remoteBranches',
 												) ?? true}
 											>
@@ -729,7 +827,7 @@ export class GraphHeader extends LitElement {
 											<gl-checkbox
 												value="pullRequests"
 												onChange=${() => this.handleOnMinimapAdditionalTypesChange()}
-												?checked=${this._state.config?.minimapMarkerTypes?.includes(
+												?checked=${this.state.config?.minimapMarkerTypes?.includes(
 													'pullRequests',
 												) ?? true}
 											>
@@ -741,9 +839,8 @@ export class GraphHeader extends LitElement {
 											<gl-checkbox
 												value="stashes"
 												onChange=${() => this.handleOnMinimapAdditionalTypesChange()}
-												?checked=${this._state.config?.minimapMarkerTypes?.includes(
-													'stashes',
-												) ?? false}
+												?checked=${this.state.config?.minimapMarkerTypes?.includes('stashes') ??
+												false}
 											>
 												<span class="minimap-marker-swatch" data-marker="stashes"></span>
 												Stashes
@@ -753,7 +850,7 @@ export class GraphHeader extends LitElement {
 											<gl-checkbox
 												value="tags"
 												onChange=${() => this.handleOnMinimapAdditionalTypesChange()}
-												?checked=${this._state.config?.minimapMarkerTypes?.includes('tags') ??
+												?checked=${this.state.config?.minimapMarkerTypes?.includes('tags') ??
 												true}
 											>
 												<span class="minimap-marker-swatch" data-marker="tags"></span>
@@ -769,7 +866,7 @@ export class GraphHeader extends LitElement {
 			)}
 			<div
 				class=${`progress-container infinite${
-					this._state.loading || this._state.rowsStatsLoading ? ' active' : ''
+					this.state.loading || this.state.rowsStatsLoading ? ' active' : ''
 				}`}
 				role="progressbar"
 			>
@@ -789,17 +886,130 @@ export class GraphHeader extends LitElement {
 	handleBranchesVisibility() {
 		throw new Error('Method not implemented.');
 	}
-	handleSearchInput(e: any) {
-		throw new Error('Method not implemented.');
+
+	private handleSearchInput = (e: CustomEvent<SearchQuery>) => {
+		this.graphSearchingState.filter = e.detail;
+		// this.appState.searchQuery = e.detail;
+		// setSearchResults(undefined);
+		// setSearchResultsError(undefined);
+		// setSearchResultsHidden(false);
+		// setSearching(isValid);
+		// this._ipc.sendCommand onSearch?.(isValid ? detail : undefined);
+		// this.appState.searchResultsHidden = false;
+		// this.appState.searching = true;
+		// try {
+		// 	void this._ipc.sendRequest(SearchRequest, { search: e.detail /*limit: options?.limit*/ });
+		// 	// TODO:
+		// 	// this.updateSearchResultState(rsp);
+		// } catch {
+		// 	this.state.searchResults = undefined;
+	};
+
+	handleSearchNavigation(e: CustomEvent<SearchNavigationEventDetail>) {
+		const results = this.searchResults;
+		if (results == null) return;
+
+		const direction = e.detail?.direction ?? 'next';
+
+		const count = results.count;
+
+		let searchIndex;
+		let id: string | undefined;
+
+		let next;
+		if (direction === 'first') {
+			next = false;
+			searchIndex = 0;
+		} else if (direction === 'last') {
+			next = false;
+			searchIndex = -1;
+		} else {
+			next = direction === 'next';
+			[searchIndex, id] = this.getClosestSearchResultIndex(
+				results,
+				this.graphSearchingState.filter,
+				this.appState.activeRow,
+				next,
+			);
+		}
+
+		let iterations = 0;
+		// Avoid infinite loops
+		while (iterations < 1000) {
+			iterations++;
+
+			// Indicates a boundary and we need to load more results
+			if (searchIndex === -1) {
+				if (next) {
+					if (this.graphSearchingState.filter != null && results?.paging?.hasMore) {
+						// setSearching(true);
+						let moreResults;
+						// try {
+						// 	moreResults = await onSearchPromise?.(searchQuery, { more: true });
+						// } finally {
+						// 	setSearching(false);
+						// }
+						// if (moreResults?.results != null && !('error' in moreResults.results)) {
+						// 	if (count < moreResults.results.count) {
+						// 		results = moreResults.results;
+						// 		searchIndex = count;
+						// 		count = results.count;
+						// 	} else {
+						// 		searchIndex = 0;
+						// 	}
+						// } else {
+						// 	searchIndex = 0;
+					}
+				} else {
+					searchIndex = 0;
+				}
+			} else if (direction === 'last' && this.graphSearchingState.filter != null && results?.paging?.hasMore) {
+				// setSearching(true);
+				let moreResults;
+				// try {
+				// 	moreResults = await onSearchPromise?.(searchQuery, { limit: 0, more: true });
+				// } finally {
+				// 	setSearching(false);
+				// }
+				// if (moreResults?.results != null && !('error' in moreResults.results)) {
+				// 	if (count < moreResults.results.count) {
+				// 		results = moreResults.results;
+				// 		count = results.count;
+				// 	}
+				// 	searchIndex = count;
+				// }
+			} else {
+				searchIndex = count - 1;
+			}
+		}
+
+		// 	id = id ?? getSearchResultIdByIndex(results, searchIndex);
+		// 	if (id != null) {
+		// 		id = await ensureSearchResultRow(id);
+		// 		if (id != null) break;
+		// 	}
+
+		// 	setSearchResultsHidden(true);
+
+		// 	searchIndex = getNextOrPreviousSearchResultIndex(searchIndex, next, results, searchQuery);
+		// }
+
+		if (id != null) {
+			console.log('[id]', id);
+			this.dispatchEvent(new CustomEvent('gl-select-commits', { detail: id }));
+			// queueMicrotask(() => graphRef.current?.selectCommits([id], false, true));
+		}
 	}
-	handleSearchNavigation(e: any) {
-		throw new Error('Method not implemented.');
-	}
+
 	handleSearchModeChange(e: any) {
-		throw new Error('Method not implemented.');
+		// TODO:  loads twice ???
+		this.graphSearchingState.filter = {
+			...this.graphSearchingState.filter,
+			filter: !this.graphSearchingState.filter.filter,
+		};
 	}
 	handleOnMinimapToggle() {
-		throw new Error('Method not implemented.');
+		this._ipc.sendCommand(UpdateGraphConfigurationCommand, { changes: { minimap: !this.state.config?.minimap } });
 	}
 	handleOnMinimapDataTypeChange() {
 		throw new Error('Method not implemented.');
@@ -808,7 +1018,7 @@ export class GraphHeader extends LitElement {
 		throw new Error('Method not implemented.');
 	}
 	renderBranchStateIcon(): unknown {
-		const { branchState } = this._state;
+		const { branchState } = this.state;
 		if (branchState?.pr) {
 			return nothing;
 		}

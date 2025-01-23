@@ -1,10 +1,11 @@
 import type { CssVariables, GraphRow } from '@gitkraken/gitkraken-components';
-import { css, html } from 'lit';
+import { css, html, LitElement } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 /*global document window*/
 import '@shoelace-style/shoelace/dist/components/option/option.component.js';
 import '@shoelace-style/shoelace/dist/components/select/select.component.js';
 import { Color, getCssVariable, mix, opacity } from '../../../../system/color';
+import { debounce } from '../../../../system/function';
 import type { GraphExcludedRef, State } from '../../../plus/graph/protocol';
 import { OpenPullRequestDetailsCommand, UpdateRefsVisibilityCommand } from '../../../plus/graph/protocol';
 import type { StateProvider } from '../../shared/app';
@@ -26,14 +27,16 @@ import './graph.scss';
 import graphStyles from './graph.scss?lit';
 import type { GlGraphMinimapContainer } from './minimap/minimap-container';
 import './sidebar/sidebar';
-import { GraphStateProvider } from './stateProvider';
+import type { GraphAppState } from './stateProvider';
+import { graphAppStore, graphStateContext, GraphStateProvider } from './stateProvider';
 import { GlElement } from '../../shared/components/element';
 import { consume } from '@lit/context';
 import { stateContext } from './context';
 import type { GraphMinimapDaySelectedEventDetail } from './minimap/minimap';
+import { SignalWatcher } from '@lit-labs/signals';
 
 @customElement('gl-graph-app-wc')
-export class GraphAppWC extends GlElement {
+export class GraphAppWC extends SignalWatcher(LitElement) {
 	@consume({ context: stateContext, subscribe: true })
 	state!: typeof stateContext.__context__;
 
@@ -147,27 +150,30 @@ export class GraphAppWC extends GlElement {
 		// );
 	}
 
-	@state()
-	visibleDays?: { top: number; bottom: number };
-
-	private handleOnGraphVisibleRowsChanged = (top: GraphRow, bottom: GraphRow) => {
-		this.visibleDays = {
-			top: new Date(top.date).setHours(23, 59, 59, 999),
-			bottom: new Date(bottom.date).setHours(0, 0, 0, 0),
-		};
-	};
-
 	@query('gl-graph-minimap-container')
 	minimapEl!: GlGraphMinimapContainer;
 
 	@query('gl-graph-wrapper')
 	graphEl!: GLGraphWrapper;
 
+	@consume({ context: graphStateContext, subscribe: true })
+	graphApp!: typeof graphStateContext.__context__;
+
+	private handleSetVisibleDays(e: CustomEvent<GraphAppState['visibleDays']>) {
+		this.graphApp.visibleDays = e.detail;
+	}
+
+	@query('gl-graph-wrapper')
+	graphWrapper!: GLGraphWrapper;
+
+	private handleHeaderSearchNavigation(e: CustomEvent<string>) {
+		this.graphWrapper.selectCommits([e.detail], false, true);
+	}
+
 	override render() {
-		console.log('activeDay', this.state.activeDay, this.state.visibleDays);
-		return html`<gl-graph-header></gl-graph-header
+		return html`<gl-graph-header @gl-select-commits=${this.handleHeaderSearchNavigation}></gl-graph-header
 			><gl-graph-minimap-container
-				.activeDay=${this.state.activeDay}
+				.activeDay=${this.graphApp.activeDay}
 				.disabled=${!this.state.config?.minimap}
 				.rows=${this.state.rows ?? []}
 				.rowsStats=${this.state.rowsStats}
@@ -175,18 +181,13 @@ export class GraphAppWC extends GlElement {
 				.markerTypes=${this.state.config?.minimapMarkerTypes ?? []}
 				.refMetadata=${this.state.refsMetadata}
 				.searchResults=${this.state.searchResults}
-				.visibleDays=${this.state.visibleDays}
-				@gl-graph-minimap-selected=${e => this.handleOnMinimapDaySelected(e)}
+				@gl-graph-minimap-selected=${this.handleOnMinimapDaySelected}
+				.visibleDays=${this.graphApp.visibleDays}
 			></gl-graph-minimap-container>
 			<gl-graph-hover id="commit-hover" distance=${0} skidding=${15}></gl-graph-hover>
 			<main id="main" className="graph-app__main">
 				<gl-graph-sidebar></gl-graph-sidebar
-				><gl-graph-wrapper
-					@gl-graph-change-visible-days=${e => {
-						console.log('activeday', e);
-						this.state.visibleDays = e.detail;
-					}}
-				></gl-graph-wrapper>
+				><gl-graph-wrapper @gl-graph-change-visible-days=${this.handleSetVisibleDays}></gl-graph-wrapper>
 			</main>`;
 	}
 }

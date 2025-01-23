@@ -125,15 +125,6 @@ export interface State extends WebviewState {
 	excludeTypes?: GraphExcludeTypes;
 	includeOnlyRefs?: GraphIncludeOnlyRefs;
 	featurePreview?: FeaturePreview;
-
-	// Props below are computed in the webview (not passed)
-	activeDay?: number;
-	activeRow?: string;
-	visibleDays?: {
-		top: number;
-		bottom: number;
-	};
-	theming?: { cssVariables: CssVariables; themeOpacityFactor: number };
 }
 
 export interface BranchState extends GitTrackingState {

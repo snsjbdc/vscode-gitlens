@@ -1,6 +1,7 @@
 import type { CssVariables, GraphRef, GraphRow, GraphSearchMode } from '@gitkraken/gitkraken-components';
 import type GraphContainer from '@gitkraken/gitkraken-components';
 import { consume } from '@lit/context';
+import { SignalWatcher } from '@lit-labs/signals';
 import r2wc from '@r2wc/react-to-web-component';
 import type { CSSResultArray, PropertyValues } from 'lit';
 import { css, html, LitElement } from 'lit';
@@ -34,6 +35,7 @@ import { ipcContext } from '../../shared/context';
 import { stateContext } from './context';
 import graphStyles from './graph.scss?lit';
 import { SafeGraphWrapper } from './GraphWrapper';
+import { graphStateContext } from './stateProvider';
 
 /** wrap handler to custom event listener */
 function $w<T>(handler: (prop: T) => void) {
@@ -100,7 +102,7 @@ const WebGraph = r2wc(SafeGraphWrapper, {
 customElements.define('web-graph', WebGraph);
 
 @customElement('gl-graph-wrapper')
-export class GLGraphWrapper extends LitElement {
+export class GLGraphWrapper extends SignalWatcher(LitElement) {
 	@consume<State>({ context: stateContext, subscribe: true })
 	private _state!: State;
 
@@ -268,6 +270,17 @@ export class GLGraphWrapper extends LitElement {
 	private onSelectionChanged(rows: GraphRow[]) {
 		const selection = rows.filter(r => r != null).map(r => ({ id: r.sha, type: r.type as GitGraphRowType }));
 		// this._telemetry.sendEvent({ name: 'graph/row/selected', data: { rows: selection.length } });
+
+		// hover.current?.hide();
+
+		const active = rows[rows.length - 1];
+		const activeKey = active != null ? `${active.sha}|${active.date}` : undefined;
+		// HACK: Ensure the main state is updated since it doesn't come from the extension
+		// state.activeRow = activeKey;
+		// setActiveRow(activeKey);
+		this.graphAppState.activeRow = activeKey;
+		this.graphAppState.activeDay = active?.date;
+
 		this._ipc.sendCommand(UpdateSelectionCommand, {
 			selection: selection,
 		});
@@ -302,6 +315,9 @@ export class GLGraphWrapper extends LitElement {
 		this.dispatchEvent(new CustomEvent('gl-graph-change-visible-days', { detail: args }));
 	}
 
+	@consume({ context: graphStateContext })
+	private graphAppState!: typeof graphStateContext.__context__;
+
 	private ref?: GraphContainer;
 
 	override render() {
@@ -311,7 +327,7 @@ export class GLGraphWrapper extends LitElement {
 			.avatars=${this._state.avatars ?? {}}
 			.columns=${this._state.columns ?? {}}
 			.context=${this._state.context ?? {}}
-			.theming=${this._state.theming ?? {}}
+			.theming=${this.graphAppState.theming ?? {}}
 			.config=${this._state.config ?? {}}
 			.downstreams=${this._state.downstreams ?? {}}
 			.excludeRefs=${this._state.excludeRefs ?? {}}
