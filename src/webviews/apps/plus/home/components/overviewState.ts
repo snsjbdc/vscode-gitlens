@@ -1,33 +1,38 @@
 import { createContext } from '@lit/context';
 import { signalObject } from 'signal-utils/object';
-import type { GetOverviewResponse, OverviewFilters } from '../../../../home/protocol';
+import type {
+	GetActiveOverviewResponse,
+	GetInactiveOverviewResponse,
+	OverviewFilters,
+} from '../../../../home/protocol';
 import {
 	ChangeOverviewRepository,
 	DidChangeOverviewFilter,
 	DidChangeRepositories,
 	DidChangeRepositoryWip,
-	GetOverview,
+	GetActiveOverview,
+	GetInactiveOverview,
 	GetOverviewFilterState,
 } from '../../../../home/protocol';
 import { AsyncComputedState } from '../../../shared/components/signal-utils';
 import type { Disposable } from '../../../shared/events';
 import type { HostIpc } from '../../../shared/ipc';
 
-export type Overview = GetOverviewResponse;
+export type ActiveOverview = GetActiveOverviewResponse;
+export type InactiveOverview = GetInactiveOverviewResponse;
 
-export class OverviewState extends AsyncComputedState<Overview> {
+export class ActiveOverviewState extends AsyncComputedState<ActiveOverview> {
 	private readonly _disposable: Disposable | undefined;
 
 	constructor(
 		private readonly _ipc: HostIpc,
 		options?: {
 			runImmediately?: boolean;
-			initial?: Overview;
+			initial?: ActiveOverview;
 		},
 	) {
 		super(async _abortSignal => {
-			const rsp: Overview = await this._ipc.sendRequest(GetOverview, {});
-
+			const rsp: ActiveOverview = await this._ipc.sendRequest(GetActiveOverview, {});
 			return rsp;
 		}, options);
 
@@ -37,6 +42,41 @@ export class OverviewState extends AsyncComputedState<Overview> {
 					this.run(true);
 					break;
 				case DidChangeRepositoryWip.is(msg):
+					this.run(true);
+					break;
+			}
+		});
+	}
+
+	dispose() {
+		this._disposable?.dispose();
+	}
+
+	async changeRepository(): Promise<void> {
+		await this._ipc.sendRequest(ChangeOverviewRepository, undefined);
+		this.run(true);
+	}
+}
+
+export class InactiveOverviewState extends AsyncComputedState<InactiveOverview> {
+	private readonly _disposable: Disposable | undefined;
+	filter = signalObject<Partial<OverviewFilters>>({});
+
+	constructor(
+		private readonly _ipc: HostIpc,
+		options?: {
+			runImmediately?: boolean;
+			initial?: InactiveOverview;
+		},
+	) {
+		super(async _abortSignal => {
+			const rsp: InactiveOverview = await this._ipc.sendRequest(GetInactiveOverview, {});
+			return rsp;
+		}, options);
+
+		this._disposable = this._ipc.onReceiveMessage(msg => {
+			switch (true) {
+				case DidChangeRepositories.is(msg):
 					this.run(true);
 					break;
 				case DidChangeOverviewFilter.is(msg):
@@ -55,13 +95,7 @@ export class OverviewState extends AsyncComputedState<Overview> {
 	dispose(): void {
 		this._disposable?.dispose();
 	}
-
-	filter = signalObject<Partial<OverviewFilters>>({});
-
-	async changeRepository(): Promise<void> {
-		await this._ipc.sendRequest(ChangeOverviewRepository, undefined);
-		this.run(true);
-	}
 }
 
-export const overviewStateContext = createContext<Overview>('overviewState');
+export const activeOverviewStateContext = createContext<ActiveOverview>('activeOverviewState');
+export const inactiveOverviewStateContext = createContext<InactiveOverview>('inactiveOverviewState');

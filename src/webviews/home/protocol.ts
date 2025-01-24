@@ -49,7 +49,7 @@ export interface OverviewFilters {
 	recent: {
 		threshold: OverviewRecentThreshold;
 	};
-	stale: { threshold: OverviewStaleThreshold; show: boolean };
+	stale: { threshold: OverviewStaleThreshold; show: boolean; limit: number };
 }
 
 // REQUESTS
@@ -189,27 +189,51 @@ export interface GetOverviewBranch {
 		uri: string;
 	};
 }
-export interface GetOverviewBranches {
-	active: GetOverviewBranch[];
-	recent: GetOverviewBranch[];
-	stale: GetOverviewBranch[];
+
+export interface OverviewRepository {
+	name: string;
+	path: string;
+	provider?: {
+		name: string;
+		icon?: string;
+		url?: string;
+	};
 }
 
-export type GetOverviewResponse =
+export interface GetActiveOverviewRequest {
+	[key: string]: unknown;
+}
+
+// TODO: look at splitting off selected repo
+export type GetActiveOverviewResponse =
 	| {
-			repository: {
-				name: string;
-				path: string;
-				provider?: {
-					name: string;
-					icon?: string;
-					url?: string;
-				};
-				branches: GetOverviewBranches;
-			};
+			repository: OverviewRepository;
+			active: GetOverviewBranch;
 	  }
 	| undefined;
-export const GetOverview = new IpcRequest<GetOverviewRequest, GetOverviewResponse>(scope, 'overview');
+
+export const GetActiveOverview = new IpcRequest<GetActiveOverviewRequest, GetActiveOverviewResponse>(
+	scope,
+	'overview/active',
+);
+
+export interface GetInactiveOverviewRequest {
+	[key: string]: unknown;
+}
+
+// TODO: look at splitting off selected repo
+export type GetInactiveOverviewResponse =
+	| {
+			repository: OverviewRepository;
+			recent: GetOverviewBranch[];
+			stale?: GetOverviewBranch[];
+	  }
+	| undefined;
+
+export const GetInactiveOverview = new IpcRequest<GetInactiveOverviewRequest, GetInactiveOverviewResponse>(
+	scope,
+	'overview/inactive',
+);
 
 export type GetOverviewFilterStateResponse = OverviewFilters;
 export const GetOverviewFilterState = new IpcRequest<void, GetOverviewFilterStateResponse>(scope, 'overviewFilter');
