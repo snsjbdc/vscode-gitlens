@@ -6,8 +6,9 @@ import type {
 	OverviewFilters,
 } from '../../../../home/protocol';
 import {
-	ChangeOverviewRepository,
+	ChangeOverviewRepositoryCommand,
 	DidChangeOverviewFilter,
+	DidChangeOverviewRepository,
 	DidChangeRepositories,
 	DidChangeRepositoryWip,
 	GetActiveOverview,
@@ -44,6 +45,9 @@ export class ActiveOverviewState extends AsyncComputedState<ActiveOverview> {
 				case DidChangeRepositoryWip.is(msg):
 					this.run(true);
 					break;
+				case DidChangeOverviewRepository.is(msg):
+					this.run(true);
+					break;
 			}
 		});
 	}
@@ -52,9 +56,8 @@ export class ActiveOverviewState extends AsyncComputedState<ActiveOverview> {
 		this._disposable?.dispose();
 	}
 
-	async changeRepository(): Promise<void> {
-		await this._ipc.sendRequest(ChangeOverviewRepository, undefined);
-		this.run(true);
+	changeRepository(): void {
+		this._ipc.sendCommand(ChangeOverviewRepositoryCommand, undefined);
 	}
 }
 
@@ -82,6 +85,9 @@ export class InactiveOverviewState extends AsyncComputedState<InactiveOverview> 
 				case DidChangeOverviewFilter.is(msg):
 					this.filter.recent = msg.params.filter.recent;
 					this.filter.stale = msg.params.filter.stale;
+					this.run(true);
+					break;
+				case DidChangeOverviewRepository.is(msg):
 					this.run(true);
 					break;
 			}

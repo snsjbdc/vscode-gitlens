@@ -63,10 +63,6 @@ export const GetLaunchpadSummary = new IpcRequest<GetLaunchpadSummaryRequest, Ge
 	'launchpad/summary',
 );
 
-export interface GetOverviewRequest {
-	[key: string]: unknown;
-}
-
 export interface GetOverviewBranch {
 	reference: GitBranchReference;
 
@@ -238,7 +234,8 @@ export const GetInactiveOverview = new IpcRequest<GetInactiveOverviewRequest, Ge
 export type GetOverviewFilterStateResponse = OverviewFilters;
 export const GetOverviewFilterState = new IpcRequest<void, GetOverviewFilterStateResponse>(scope, 'overviewFilter');
 
-export const ChangeOverviewRepository = new IpcRequest<undefined, undefined>(scope, 'overview/repository/change');
+export const ChangeOverviewRepositoryCommand = new IpcCommand<undefined>(scope, 'overview/repository/change');
+export const DidChangeOverviewRepository = new IpcNotification<undefined>(scope, 'overview/repository/didChange');
 
 // COMMANDS
 

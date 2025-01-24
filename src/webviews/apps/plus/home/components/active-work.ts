@@ -189,7 +189,7 @@ export class GlActiveWork extends SignalWatcher(LitElement) {
 	}
 
 	private onChange(_e: MouseEvent) {
-		void this._activeOverviewState.changeRepository();
+		this._activeOverviewState.changeRepository();
 	}
 }
 

@@ -80,12 +80,13 @@ import type {
 	State,
 } from './protocol';
 import {
-	ChangeOverviewRepository,
+	ChangeOverviewRepositoryCommand,
 	CollapseSectionCommand,
 	DidChangeIntegrationsConnections,
 	DidChangeLaunchpad,
 	DidChangeOrgSettings,
 	DidChangeOverviewFilter,
+	DidChangeOverviewRepository,
 	DidChangePreviewEnabled,
 	DidChangeRepositories,
 	DidChangeRepositoryWip,
@@ -234,7 +235,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 
 		if (pick == null || pick === currentRepo) return;
 
-		this.selectRepository(pick.path);
+		return this.selectRepository(pick.path);
 	}
 
 	private onRepositoriesChanged() {
@@ -352,9 +353,9 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 			case GetOverviewFilterState.is(e):
 				void this.host.respond(GetOverviewFilterState, e, this._overviewBranchFilter);
 				break;
-			case ChangeOverviewRepository.is(e):
-				await this.onChooseRepository();
-				void this.host.respond(ChangeOverviewRepository, e, undefined);
+			case ChangeOverviewRepositoryCommand.is(e):
+				if ((await this.onChooseRepository()) == null) return;
+				void this.host.notify(DidChangeOverviewRepository, undefined);
 				break;
 			case TogglePreviewEnabledCommand.is(e):
 				this.onTogglePreviewEnabled();
