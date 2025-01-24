@@ -1,15 +1,15 @@
 import { consume } from '@lit/context';
 import { Task } from '@lit/task';
 import { css, html, LitElement, nothing } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { customElement } from 'lit/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
 import type { State } from '../../../../plus/graph/protocol';
 import { DidChangeNotification, GetCountsRequest } from '../../../../plus/graph/protocol';
+import '../../../shared/components/code-icon';
+import '../../../shared/components/overlays/tooltip';
 import { ipcContext } from '../../../shared/context';
 import type { Disposable } from '../../../shared/events';
 import type { HostIpc } from '../../../shared/ipc';
-import '../../../shared/components/code-icon';
-import '../../../shared/components/overlays/tooltip';
 import { emitTelemetrySentEvent } from '../../../shared/telemetry';
 import { stateContext } from '../context';
 

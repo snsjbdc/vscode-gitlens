@@ -2,10 +2,10 @@
 import type { GraphRefOptData } from '@gitkraken/gitkraken-components';
 import { consume } from '@lit/context';
 import { SignalWatcher } from '@lit-labs/signals';
-import '@shoelace-style/shoelace/dist/components/option/option.component.js';
-import '@shoelace-style/shoelace/dist/components/select/select.component.js';
-import { css, html, LitElement, nothing } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import '@shoelace-style/shoelace/dist/components/option/option.js';
+import '@shoelace-style/shoelace/dist/components/select/select.js';
+import { html, LitElement, nothing } from 'lit';
+import { customElement } from 'lit/decorators.js';
 import { ifDefined } from 'lit/directives/if-defined.js';
 import { repeat } from 'lit/directives/repeat.js';
 import { when } from 'lit/directives/when.js';
@@ -17,11 +17,11 @@ import type { SearchQuery } from '../../../../constants.search';
 import { isSubscriptionPaid } from '../../../../plus/gk/utils/subscription.utils';
 import type { LaunchpadCommandArgs } from '../../../../plus/launchpad/launchpad';
 import { createCommandLink } from '../../../../system/commands';
-import { debounce } from '../../../../system/function';
 import { createWebviewCommandLink } from '../../../../system/webview';
 import type {
 	GraphExcludedRef,
 	GraphExcludeTypes,
+	GraphMinimapMarkerTypes,
 	GraphSearchResults,
 	GraphSearchResultsError,
 	State,
@@ -29,7 +29,6 @@ import type {
 import {
 	OpenPullRequestDetailsCommand,
 	SearchOpenInViewCommand,
-	SearchRequest,
 	UpdateExcludeTypesCommand,
 	UpdateGraphConfigurationCommand,
 	UpdateIncludedRefsCommand,
@@ -40,9 +39,14 @@ import '../../shared/components/button';
 import '../../shared/components/code-icon';
 import type { CustomEventType } from '../../shared/components/element';
 import '../../shared/components/menu';
+import '../../shared/components/checkbox/checkbox';
+import '../../shared/components/radio/radio-group';
+import '../../shared/components/radio/radio';
 import '../../shared/components/overlays/popover';
+import '../../shared/components/search/search-box';
 import '../../shared/components/overlays/tooltip';
 import '../../shared/components/rich/issue-pull-request';
+import type { SearchNavigationEventDetail } from '../../shared/components/search/search-input';
 import { ipcContext } from '../../shared/context';
 import { emitTelemetrySentEvent } from '../../shared/telemetry';
 import '../shared/components/merge-rebase-status';
@@ -53,7 +57,7 @@ import './graph.scss';
 import graphStyles from './graph.scss?lit';
 import type { GraphSearchingState } from './stateProvider';
 import { graphSearchStateContext, graphStateContext } from './stateProvider';
-import type { SearchNavigationEventDetail } from '../../shared/components/search/search-input';
+import type { RadioGroup } from '../../shared/components/radio/radio-group';
 
 function getSearchResultModel(state: GraphSearchingState['state']): {
 	results: undefined | GraphSearchResults;
@@ -681,7 +685,7 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 												>
 													<gl-checkbox
 														value="onlyFollowFirstParent"
-														onChange=${() => this.handleFilterChange()}
+														@gl-change-value=${this.handleFilterChange}
 														checked=${this.state.config?.onlyFollowFirstParent ?? false}
 													>
 														Simplify Merge History
@@ -692,7 +696,7 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 											<menu-item role="none">
 												<gl-checkbox
 													value="remotes"
-													onChange=${this.handleFilterChange}
+													@gl-change-value=${this.handleFilterChange}
 													?checked=${this.state.excludeTypes?.remotes ?? false}
 												>
 													Hide Remote-only Branches
@@ -701,7 +705,7 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 											<menu-item role="none">
 												<gl-checkbox
 													value="stashes"
-													onChange=${this.handleFilterChange}
+													@gl-change-value=${this.handleFilterChange}
 													?checked=${this.state.excludeTypes?.stashes ?? false}
 												>
 													Hide Stashes
@@ -712,7 +716,7 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 									<menu-item role="none">
 										<gl-checkbox
 											value="tags"
-											onChange=${this.handleFilterChange}
+											@gl-change-value=${this.handleFilterChange}
 											?checked=${this.state.excludeTypes?.tags ?? false}
 										>
 											Hide Tags
@@ -722,7 +726,7 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 									<menu-item role="none">
 										<gl-checkbox
 											value="mergeCommits"
-											onChange=${this.handleFilterChange}
+											@gl-change-value=${this.handleFilterChange}
 											checked=${this.state.config?.dimMergeCommits ?? false}
 										>
 											Dim Merge Commit Rows
@@ -787,22 +791,22 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 									<div slot="content">
 										<menu-label>Minimap</menu-label>
 										<menu-item role="none">
-											<gl-radioGroup
+											<gl-radio-group
 												value=${this.state.config?.minimapDataType ?? 'commits'}
-												onChange=${() => this.handleOnMinimapDataTypeChange()}
+												@gl-change-value=${this.handleOnMinimapDataTypeChange}
 											>
 												<gl-radio name="minimap-datatype" value="commits"> Commits </gl-radio>
 												<gl-radio name="minimap-datatype" value="lines">
 													Lines Changed
 												</gl-radio>
-											</gl-radioGroup>
+											</gl-radio-group>
 										</menu-item>
 										<menu-divider></menu-divider>
 										<menu-label>Markers</menu-label>
 										<menu-item role="none">
 											<gl-checkbox
 												value="localBranches"
-												onChange=${() => this.handleOnMinimapAdditionalTypesChange()}
+												@gl-change-value=${this.handleOnMinimapAdditionalTypesChange}
 												?checked=${this.state.config?.minimapMarkerTypes?.includes(
 													'localBranches',
 												) ?? false}
@@ -814,7 +818,7 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 										<menu-item role="none">
 											<gl-checkbox
 												value="remoteBranches"
-												onChange=${() => this.handleOnMinimapAdditionalTypesChange()}
+												@gl-change-value=${this.handleOnMinimapAdditionalTypesChange}
 												?checked=${this.state.config?.minimapMarkerTypes?.includes(
 													'remoteBranches',
 												) ?? true}
@@ -826,7 +830,7 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 										<menu-item role="none">
 											<gl-checkbox
 												value="pullRequests"
-												onChange=${() => this.handleOnMinimapAdditionalTypesChange()}
+												@gl-change-value=${this.handleOnMinimapAdditionalTypesChange}
 												?checked=${this.state.config?.minimapMarkerTypes?.includes(
 													'pullRequests',
 												) ?? true}
@@ -838,7 +842,7 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 										<menu-item role="none">
 											<gl-checkbox
 												value="stashes"
-												onChange=${() => this.handleOnMinimapAdditionalTypesChange()}
+												@gl-change-value=${this.handleOnMinimapAdditionalTypesChange}
 												?checked=${this.state.config?.minimapMarkerTypes?.includes('stashes') ??
 												false}
 											>
@@ -849,7 +853,7 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 										<menu-item role="none">
 											<gl-checkbox
 												value="tags"
-												onChange=${() => this.handleOnMinimapAdditionalTypesChange()}
+												@gl-change-value=${this.handleOnMinimapAdditionalTypesChange}
 												?checked=${this.state.config?.minimapMarkerTypes?.includes('tags') ??
 												true}
 											>
@@ -1011,12 +1015,43 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 	handleOnMinimapToggle() {
 		this._ipc.sendCommand(UpdateGraphConfigurationCommand, { changes: { minimap: !this.state.config?.minimap } });
 	}
-	handleOnMinimapDataTypeChange() {
-		throw new Error('Method not implemented.');
+
+	handleOnMinimapDataTypeChange(e: Event) {
+		if (this.state.config == null) return;
+
+		const $el = e.target as RadioGroup;
+		const minimapDataType = $el.value === 'lines' ? 'lines' : 'commits';
+		if (this.state.config.minimapDataType === minimapDataType) return;
+
+		this._ipc.sendCommand(UpdateGraphConfigurationCommand, { changes: { minimapDataType: minimapDataType } });
 	}
-	handleOnMinimapAdditionalTypesChange() {
-		throw new Error('Method not implemented.');
-	}
+
+	private handleOnMinimapAdditionalTypesChange = (e: Event) => {
+		if (this.state.config?.minimapMarkerTypes == null) return;
+
+		const $el = e.target as HTMLInputElement;
+		const value = $el.value as GraphMinimapMarkerTypes;
+
+		if ($el.checked) {
+			if (!this.state.config.minimapMarkerTypes.includes(value)) {
+				const minimapMarkerTypes = [...this.state.config.minimapMarkerTypes, value];
+				// setGraphConfig({ ...config, minimapMarkerTypes: minimapMarkerTypes });
+				this._ipc.sendCommand(UpdateGraphConfigurationCommand, {
+					changes: { minimapMarkerTypes: minimapMarkerTypes },
+				});
+			}
+		} else {
+			const index = this.state.config.minimapMarkerTypes.indexOf(value);
+			if (index !== -1) {
+				const minimapMarkerTypes = [...this.state.config.minimapMarkerTypes];
+				minimapMarkerTypes.splice(index, 1);
+				// setGraphConfig({ ...graphConfig, minimapMarkerTypes: minimapMarkerTypes });
+				this._ipc.sendCommand(UpdateGraphConfigurationCommand, {
+					changes: { minimapMarkerTypes: minimapMarkerTypes },
+				});
+			}
+		}
+	};
 	renderBranchStateIcon(): unknown {
 		const { branchState } = this.state;
 		if (branchState?.pr) {

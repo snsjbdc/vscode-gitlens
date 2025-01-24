@@ -3,15 +3,14 @@ import { ContextProvider, createContext } from '@lit/context';
 import { signal } from '@lit-labs/signals';
 import type { ReactiveControllerHost } from 'lit';
 import { SignalObject } from 'signal-utils/object';
-import { create } from 'zustand';
 import type { SearchQuery } from '../../../../constants.search';
-import { DidChangeNotification } from '../../../commitDetails/protocol';
 import type { DidSearchParams, State } from '../../../plus/graph/protocol';
 import {
 	DidChangeAvatarsNotification,
 	DidChangeBranchStateNotification,
 	DidChangeColumnsNotification,
 	DidChangeGraphConfigurationNotification,
+	DidChangeNotification,
 	DidChangeRefsMetadataNotification,
 	DidChangeRefsVisibilityNotification,
 	DidChangeRepoConnectionNotification,
@@ -186,6 +185,7 @@ export class GraphStateProvider implements StateProvider<State> {
 			switch (true) {
 				case DidChangeNotification.is(msg):
 					for (const key in msg.params.state) {
+						// @ts-expect-error dynamic object key ejection doesn't work in typescript
 						this._state[key] = msg.params.state[key];
 					}
 					this.provider.setValue(this._state, true);

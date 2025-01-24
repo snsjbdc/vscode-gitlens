@@ -1,16 +1,15 @@
-import type { CssVariables, GraphRef, GraphRow, GraphSearchMode } from '@gitkraken/gitkraken-components';
 import type GraphContainer from '@gitkraken/gitkraken-components';
+import type { CssVariables, GraphRef, GraphRow, GraphSearchMode } from '@gitkraken/gitkraken-components';
 import { consume } from '@lit/context';
 import { SignalWatcher } from '@lit-labs/signals';
 import r2wc from '@r2wc/react-to-web-component';
-import type { CSSResultArray, PropertyValues } from 'lit';
-import { css, html, LitElement } from 'lit';
+import type { PropertyValues } from 'lit';
+import { html, LitElement } from 'lit';
 import { customElement, query } from 'lit/decorators.js';
 import { ifDefined } from 'lit/directives/if-defined.js';
-import { map } from 'lit/directives/map.js';
 import type { GitGraphRowType } from '../../../../git/models/graph';
 import { getCssVariable, mix, opacity } from '../../../../system/color';
-import { flatMap, flatten, forEach } from '../../../../system/iterable';
+import { forEach } from '../../../../system/iterable';
 import type {
 	GraphAvatars,
 	GraphColumnsConfig,
@@ -33,7 +32,6 @@ import {
 import { UpdateSelectionCommand } from '../../../rebase/protocol';
 import { ipcContext } from '../../shared/context';
 import { stateContext } from './context';
-import graphStyles from './graph.scss?lit';
 import { SafeGraphWrapper } from './GraphWrapper';
 import { graphStateContext } from './stateProvider';
 
@@ -103,23 +101,26 @@ customElements.define('web-graph', WebGraph);
 
 @customElement('gl-graph-wrapper')
 export class GLGraphWrapper extends SignalWatcher(LitElement) {
+	protected override createRenderRoot(): HTMLElement | DocumentFragment {
+		return this;
+	}
 	@consume<State>({ context: stateContext, subscribe: true })
 	private _state!: State;
 
 	@consume({ context: ipcContext })
 	private _ipc!: typeof ipcContext.__context__;
 
-	static override get styles() {
-		return [
-			graphStyles,
-			css`
-				web-graph {
-					height: 100%;
-					display: flex;
-				}
-			`,
-		] as CSSResultArray;
-	}
+	// static override get styles() {
+	// 	return [
+	// 		graphStyles,
+	// 		css`
+	// 			web-graph {
+	// 				height: 100%;
+	// 				display: flex;
+	// 			}
+	// 		`,
+	// 	] as CSSResultArray;
+	// }
 
 	private getGraphTheming(): { cssVariables: CssVariables; themeOpacityFactor: number } {
 		// this will be called on theme updated as well as on config updated since it is dependent on the column colors from config changes and the background color from the theme

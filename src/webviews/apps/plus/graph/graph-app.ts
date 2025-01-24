@@ -1,15 +1,9 @@
-import type { CssVariables, GraphRow } from '@gitkraken/gitkraken-components';
-import { css, html, LitElement } from 'lit';
-import { customElement, query, state } from 'lit/decorators.js';
-/*global document window*/
+import { consume } from '@lit/context';
+import { SignalWatcher } from '@lit-labs/signals';
+import { html, LitElement } from 'lit';
+import { customElement, query } from 'lit/decorators.js';
 import '@shoelace-style/shoelace/dist/components/option/option.component.js';
 import '@shoelace-style/shoelace/dist/components/select/select.component.js';
-import { Color, getCssVariable, mix, opacity } from '../../../../system/color';
-import { debounce } from '../../../../system/function';
-import type { GraphExcludedRef, State } from '../../../plus/graph/protocol';
-import { OpenPullRequestDetailsCommand, UpdateRefsVisibilityCommand } from '../../../plus/graph/protocol';
-import type { StateProvider } from '../../shared/app';
-import { GlApp } from '../../shared/app';
 import '../../shared/components/branch-icon';
 import '../../shared/components/button';
 import '../../shared/components/code-icon';
@@ -17,44 +11,27 @@ import '../../shared/components/menu';
 import '../../shared/components/overlays/popover';
 import '../../shared/components/overlays/tooltip';
 import '../../shared/components/rich/issue-pull-request';
-import type { HostIpc } from '../../shared/ipc';
-import type { ThemeChangeEvent } from '../../shared/theme';
+import { emitTelemetrySentEvent } from '../../shared/telemetry';
 import '../shared/components/merge-rebase-status';
 import './actions/gitActionsButtons.wc';
+import { stateContext } from './context';
 import './graph-header';
 import type { GLGraphWrapper } from './graph-wrapper';
 import './graph.scss';
-import graphStyles from './graph.scss?lit';
+import type { GraphMinimapDaySelectedEventDetail } from './minimap/minimap';
 import type { GlGraphMinimapContainer } from './minimap/minimap-container';
 import './sidebar/sidebar';
 import type { GraphAppState } from './stateProvider';
-import { graphAppStore, graphStateContext, GraphStateProvider } from './stateProvider';
-import { GlElement } from '../../shared/components/element';
-import { consume } from '@lit/context';
-import { stateContext } from './context';
-import type { GraphMinimapDaySelectedEventDetail } from './minimap/minimap';
-import { SignalWatcher } from '@lit-labs/signals';
+import { graphStateContext } from './stateProvider';
 
 @customElement('gl-graph-app-wc')
 export class GraphAppWC extends SignalWatcher(LitElement) {
+	protected override createRenderRoot(): HTMLElement | DocumentFragment {
+		return this;
+	}
+
 	@consume({ context: stateContext, subscribe: true })
 	state!: typeof stateContext.__context__;
-
-	@state()
-	searching: string = '';
-
-	static override styles = [
-		graphStyles,
-		css`
-			main {
-				display: flex;
-				height: 100%;
-			}
-			gl-graph-wrapper {
-				flex: 1;
-			}
-		`,
-	];
 
 	// private async onHoverRowPromise(row: GraphRow) {
 	// 	try {
@@ -140,14 +117,14 @@ export class GraphAppWC extends SignalWatcher(LitElement) {
 
 		this.graphEl.selectCommits([sha], false, true);
 
-		// queueMicrotask(
-		// 	() =>
-		// 		e.target &&
-		// 		emitTelemetrySentEvent<'graph/minimap/day/selected'>(e.target, {
-		// 			name: 'graph/minimap/day/selected',
-		// 			data: {},
-		// 		}),
-		// );
+		queueMicrotask(
+			() =>
+				e.target &&
+				emitTelemetrySentEvent<'graph/minimap/day/selected'>(e.target, {
+					name: 'graph/minimap/day/selected',
+					data: {},
+				}),
+		);
 	}
 
 	@query('gl-graph-minimap-container')
@@ -185,7 +162,7 @@ export class GraphAppWC extends SignalWatcher(LitElement) {
 				.visibleDays=${this.graphApp.visibleDays}
 			></gl-graph-minimap-container>
 			<gl-graph-hover id="commit-hover" distance=${0} skidding=${15}></gl-graph-hover>
-			<main id="main" className="graph-app__main">
+			<main id="main" class="graph-app__main">
 				<gl-graph-sidebar></gl-graph-sidebar
 				><gl-graph-wrapper @gl-graph-change-visible-days=${this.handleSetVisibleDays}></gl-graph-wrapper>
 			</main>`;

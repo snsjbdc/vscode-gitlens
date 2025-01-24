@@ -1,9 +1,9 @@
 import type {
 	CommitType,
+	ExcludeRefsById,
 	GraphColumnMode,
 	GraphColumnSetting,
 	GraphColumnsSettings,
-	GraphContainerProps,
 	GraphPlatform,
 	GraphRef,
 	GraphRefGroup,
@@ -13,25 +13,15 @@ import type {
 	OnFormatCommitDateTime,
 } from '@gitkraken/gitkraken-components';
 import GraphContainer, { CommitDateTimeSources, refZone } from '@gitkraken/gitkraken-components';
-import type { SlChangeEvent } from '@shoelace-style/shoelace';
-import SlOption from '@shoelace-style/shoelace/dist/react/option/index.js';
-import SlSelect from '@shoelace-style/shoelace/dist/react/select/index.js';
-import type { FormEvent, MouseEvent } from 'react';
-import React, { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { FormEvent } from 'react';
+import React, { createElement, useCallback, useEffect, useMemo, useState } from 'react';
 import { getPlatform } from '@env/platform';
-import type { ConnectCloudIntegrationsCommandArgs } from '../../../../commands/cloudIntegrations';
-import type { BranchGitCommandArgs } from '../../../../commands/git/branch';
-import type { DateStyle, GraphBranchesVisibility } from '../../../../config';
-import { GlCommand } from '../../../../constants.commands';
+import type { DateStyle } from '../../../../config';
 import type { SearchQuery } from '../../../../constants.search';
-import type { Subscription } from '../../../../plus/gk/models/subscription';
-import { isSubscriptionPaid } from '../../../../plus/gk/utils/subscription.utils';
-import type { LaunchpadCommandArgs } from '../../../../plus/launchpad/launchpad';
-import { createCommandLink } from '../../../../system/commands';
+import type { DateTimeFormat } from '../../../../system/date';
+import { formatDate, fromNow } from '../../../../system/date';
 import { filterMap, first, groupByFilterMap, join } from '../../../../system/iterable';
-import { createWebviewCommandLink } from '../../../../system/webview';
 import type {
-	DidEnsureRowParams,
 	DidGetRowHoverParams,
 	DidSearchParams,
 	GraphAvatars,
@@ -39,63 +29,20 @@ import type {
 	GraphColumnsConfig,
 	GraphComponentConfig,
 	GraphExcludedRef,
-	GraphExcludeTypes,
 	GraphItemContext,
 	GraphMinimapMarkerTypes,
 	GraphMissingRefsMetadata,
 	GraphRefMetadataItem,
-	GraphRepository,
 	GraphSearchMode,
 	GraphSearchResults,
 	GraphSearchResultsError,
-	InternalNotificationType,
 	State,
 	UpdateGraphConfigurationParams,
-	UpdateStateCallback,
 } from '../../../plus/graph/protocol';
-import {
-	DidChangeAvatarsNotification,
-	DidChangeBranchStateNotification,
-	DidChangeColumnsNotification,
-	DidChangeGraphConfigurationNotification,
-	DidChangeRefsMetadataNotification,
-	DidChangeRefsVisibilityNotification,
-	DidChangeRepoConnectionNotification,
-	DidChangeRowsNotification,
-	DidChangeRowsStatsNotification,
-	DidChangeSelectionNotification,
-	DidChangeSubscriptionNotification,
-	DidChangeWorkingTreeNotification,
-	DidFetchNotification,
-	DidSearchNotification,
-	DidStartFeaturePreviewNotification,
-} from '../../../plus/graph/protocol';
-import type { IpcNotification } from '../../../protocol';
-import { DidChangeHostWindowFocusNotification } from '../../../protocol';
-import { GlButton } from '../../shared/components/button.react';
-import { GlCheckbox } from '../../shared/components/checkbox';
-import { CodeIcon } from '../../shared/components/code-icon.react';
-import { GlIndicator } from '../../shared/components/indicators/indicator.react';
 import { GlMarkdown } from '../../shared/components/markdown/markdown.react';
-import { MenuDivider, MenuItem, MenuLabel } from '../../shared/components/menu/react';
-import { GlPopover } from '../../shared/components/overlays/popover.react';
-import { GlTooltip } from '../../shared/components/overlays/tooltip.react';
 import type { RadioGroup } from '../../shared/components/radio/radio-group';
-import { GlRadio, GlRadioGroup } from '../../shared/components/radio/radio.react';
-import { GlFeatureBadge } from '../../shared/components/react/feature-badge';
-import { GlFeatureGate } from '../../shared/components/react/feature-gate';
-import { GlIssuePullRequest } from '../../shared/components/react/issue-pull-request';
-import { GlSearchBox } from '../../shared/components/search/react';
-import type {
-	SearchModeChangeEventDetail,
-	SearchNavigationEventDetail,
-} from '../../shared/components/search/search-box';
-import type { DateTimeFormat } from '../../shared/date';
-import { formatDate, fromNow } from '../../shared/date';
+import type { SearchModeChangeEventDetail } from '../../shared/components/search/search-box';
 import { emitTelemetrySentEvent } from '../../shared/telemetry';
-import { GlMergeConflictWarning } from '../shared/components/merge-rebase-status.react';
-import { GitActionsButtons } from './actions/gitActionsButtons';
-import { GlGraphHover } from './hover/graphHover.react';
 import type { GraphMinimapDaySelectedEventDetail } from './minimap/minimap';
 import type { GraphAppState } from './stateProvider';
 
@@ -302,70 +249,6 @@ export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps & Gra
 		};
 	}, [activeRow]);
 
-	const handleOnMinimapDaySelected = (e: CustomEvent<GraphMinimapDaySelectedEventDetail>) => {
-		let { sha } = e.detail;
-		if (sha == null) {
-			const date = e.detail.date?.getTime();
-			if (date == null) return;
-
-			// Find closest row to the date
-			const closest = rows.reduce((prev, curr) =>
-				Math.abs(curr.date - date) < Math.abs(prev.date - date) ? curr : prev,
-			);
-			sha = closest.sha;
-		}
-
-		graph?.selectCommits([sha], false, true);
-
-		queueMicrotask(
-			() =>
-				e.target &&
-				emitTelemetrySentEvent<'graph/minimap/day/selected'>(e.target, {
-					name: 'graph/minimap/day/selected',
-					data: {},
-				}),
-		);
-	};
-
-	const handleOnMinimapToggle = (_e: React.MouseEvent) => {
-		onChangeGraphConfiguration?.({ minimap: !config?.minimap });
-	};
-
-	// This can only be applied to one radio button for now due to a bug in the component: https://github.com/microsoft/fast/issues/6381
-	const handleOnMinimapDataTypeChange = (e: Event | FormEvent<HTMLElement>) => {
-		if (config == null) return;
-
-		const $el = e.target as RadioGroup;
-		const minimapDataType = $el.value === 'lines' ? 'lines' : 'commits';
-		if (config.minimapDataType === minimapDataType) return;
-
-		// setGraphConfig({ ...graphConfig, minimapDataType: minimapDataType });
-		onChangeGraphConfiguration?.({ minimapDataType: minimapDataType });
-	};
-
-	const handleOnMinimapAdditionalTypesChange = (e: Event | FormEvent<HTMLElement>) => {
-		if (config?.minimapMarkerTypes == null) return;
-
-		const $el = e.target as HTMLInputElement;
-		const value = $el.value as GraphMinimapMarkerTypes;
-
-		if ($el.checked) {
-			if (!config.minimapMarkerTypes.includes(value)) {
-				const minimapMarkerTypes = [...config.minimapMarkerTypes, value];
-				// setGraphConfig({ ...config, minimapMarkerTypes: minimapMarkerTypes });
-				onChangeGraphConfiguration?.({ minimapMarkerTypes: minimapMarkerTypes });
-			}
-		} else {
-			const index = config.minimapMarkerTypes.indexOf(value);
-			if (index !== -1) {
-				const minimapMarkerTypes = [...config.minimapMarkerTypes];
-				minimapMarkerTypes.splice(index, 1);
-				// setGraphConfig({ ...graphConfig, minimapMarkerTypes: minimapMarkerTypes });
-				onChangeGraphConfiguration?.({ minimapMarkerTypes: minimapMarkerTypes });
-			}
-		}
-	};
-
 	const stopColumnResize = () => {
 		const activeResizeElement = document.querySelector('.graph-header .resizable.resizing');
 		if (!activeResizeElement) return;
@@ -455,18 +338,6 @@ export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps & Gra
 		return Object.values(excludeTypes).includes(true);
 	}, [excludeTypes, config?.onlyFollowFirstParent]);
 
-	const handleSearchInput = (e: CustomEvent<SearchQuery>) => {
-		const detail = e.detail;
-		// setSearchQuery(detail);
-
-		const isValid = detail.query.length >= 3;
-		// setSearchResults(undefined);
-		// setSearchResultsError(undefined);
-		// setSearchResultsHidden(false);
-		// setSearching(isValid);
-		onSearch?.(isValid ? detail : undefined);
-	};
-
 	const handleSearchOpenInView = () => {
 		if (searchQuery == null) return;
 
@@ -522,11 +393,10 @@ export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps & Gra
 	};
 
 	const handleMoreCommits = () => {
+		// TODO
 		// setIsLoading(true);
 		props.onMoreRows?.();
 	};
-
-	console.log('onmorerows', paging);
 
 	const handleOnColumnResized = (columnName: GraphColumnName, columnSettings: GraphColumnSetting) => {
 		if (columnSettings.width) {
@@ -557,7 +427,10 @@ export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps & Gra
 	};
 
 	// dirty trick to avoid mutations on the GraphContainer side
-	const fixedExcludeRefsById = useMemo(() => ({ ...excludeRefs }), [excludeRefs]);
+	const fixedExcludeRefsById = useMemo(
+		(): ExcludeRefsById | undefined => (excludeRefs ? { ...excludeRefs } : undefined),
+		[excludeRefs],
+	);
 	const handleOnToggleRefsVisibilityClick = (_event: any, refs: GraphRefOptData[], visible: boolean) => {
 		if (!visible) {
 			document.getElementById('hiddenRefs')?.animate(
@@ -793,8 +666,8 @@ export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps & Gra
 }
 
 // TODO to be removed
-// eslint-disable-next-line @typescript-eslint/naming-convention
-export function GraphWrapper({
+
+/* export function GraphWrapper({
 	subscriber,
 	nonce,
 	state,
@@ -2336,7 +2209,7 @@ export function GraphWrapper({
 			</main>
 		</>
 	);
-}
+}*/
 
 function formatCommitDateTime(
 	date: number,
@@ -2352,100 +2225,6 @@ function formatCommitDateTime(
 			return style === 'relative' ? fromNow(date) : formatDate(date, format);
 	}
 }
-
-function getClosestSearchResultIndex(
-	results: GraphSearchResults,
-	query: SearchQuery | undefined,
-	activeRow: string | undefined,
-	next: boolean = true,
-): [number, string | undefined] {
-	if (results.ids == null) return [0, undefined];
-
-	const activeInfo = getActiveRowInfo(activeRow);
-	const activeId = activeInfo?.id;
-	if (activeId == null) return [0, undefined];
-
-	let index: number | undefined;
-	let nearestId: string | undefined;
-	let nearestIndex: number | undefined;
-
-	const data = results.ids[activeId];
-	if (data != null) {
-		index = data.i;
-		nearestId = activeId;
-		nearestIndex = index;
-	}
-
-	if (index == null) {
-		const activeDate = activeInfo?.date != null ? activeInfo.date + (next ? 1 : -1) : undefined;
-		if (activeDate == null) return [0, undefined];
-
-		// Loop through the search results and:
-		//  try to find the active id
-		//  if next=true find the nearest date before the active date
-		//  if next=false find the nearest date after the active date
-
-		let i: number;
-		let id: string;
-		let date: number;
-		let nearestDate: number | undefined;
-		for ([id, { date, i }] of Object.entries(results.ids)) {
-			if (next) {
-				if (date < activeDate && (nearestDate == null || date > nearestDate)) {
-					nearestId = id;
-					nearestDate = date;
-					nearestIndex = i;
-				}
-			} else if (date > activeDate && (nearestDate == null || date <= nearestDate)) {
-				nearestId = id;
-				nearestDate = date;
-				nearestIndex = i;
-			}
-		}
-
-		index = nearestIndex == null ? results.count - 1 : nearestIndex + (next ? -1 : 1);
-	}
-
-	index = getNextOrPreviousSearchResultIndex(index, next, results, query);
-
-	return index === nearestIndex ? [index, nearestId] : [index, undefined];
-}
-
-function getNextOrPreviousSearchResultIndex(
-	index: number,
-	next: boolean,
-	results: GraphSearchResults,
-	query: SearchQuery | undefined,
-) {
-	if (next) {
-		if (index < results.count - 1) {
-			index++;
-		} else if (query != null && results?.paging?.hasMore) {
-			index = -1; // Indicates a boundary that we should load more results
-		} else {
-			index = 0;
-		}
-	} else if (index > 0) {
-		index--;
-	} else if (query != null && results?.paging?.hasMore) {
-		index = -1; // Indicates a boundary that we should load more results
-	} else {
-		index = results.count - 1;
-	}
-	return index;
-}
-
-function getSearchResultIdByIndex(results: GraphSearchResults, index: number): string | undefined {
-	// Loop through the search results without using Object.entries or Object.keys and return the id at the specified index
-	const { ids } = results;
-	for (const id in ids) {
-		if (ids[id].i === index) return id;
-	}
-	return undefined;
-
-	// return Object.entries(results.ids).find(([, { i }]) => i === index)?.[0];
-}
-
 function getActiveRowInfo(activeRow: string | undefined): { id: string; date: number } | undefined {
 	if (activeRow == null) return undefined;
 
@@ -2454,20 +2233,4 @@ function getActiveRowInfo(activeRow: string | undefined): { id: string; date: nu
 		id: id,
 		date: Number(date),
 	};
-}
-
-function getSearchResultModel(state: State): {
-	results: GraphSearchResults | undefined;
-	resultsError: GraphSearchResultsError | undefined;
-} {
-	let results: GraphSearchResults | undefined;
-	let resultsError: GraphSearchResultsError | undefined;
-	if (state.searchResults != null) {
-		if ('error' in state.searchResults) {
-			resultsError = state.searchResults;
-		} else {
-			results = state.searchResults;
-		}
-	}
-	return { results: results, resultsError: resultsError };
 }

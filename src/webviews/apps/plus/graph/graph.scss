@@ -936,6 +936,18 @@ gl-feature-gate gl-feature-badge {
 	margin-right: 0.4rem;
 }
 
+gl-graph-app-wc {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow: hidden;
+}
+
+gl-graph-wrapper,
+web-graph {
+	display: contents;
+}
+
 .graph-app {
 	--fs-1: 1.1rem;
 	--fs-2: 1.3rem;

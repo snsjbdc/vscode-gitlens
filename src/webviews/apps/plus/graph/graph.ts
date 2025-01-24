@@ -1,36 +1,13 @@
-import type { CssVariables, GraphRefOptData } from '@gitkraken/gitkraken-components';
-import { css, html, nothing } from 'lit';
+import type { CssVariables } from '@gitkraken/gitkraken-components';
+import { provide } from '@lit/context';
+import { html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { ifDefined } from 'lit/directives/if-defined.js';
-import { repeat } from 'lit/directives/repeat.js';
-import { when } from 'lit/directives/when.js';
 /*global document window*/
-import '@shoelace-style/shoelace/dist/components/select/select.component.js';
 import '@shoelace-style/shoelace/dist/components/option/option.component.js';
-import type { ConnectCloudIntegrationsCommandArgs } from '../../../../commands/cloudIntegrations';
-import type { BranchGitCommandArgs } from '../../../../commands/git/branch';
-import type { GraphBranchesVisibility } from '../../../../config';
-import { GlCommand } from '../../../../constants.commands';
-import type { SearchQuery } from '../../../../constants.search';
-import { isSubscriptionPaid } from '../../../../plus/gk/utils/subscription.utils';
-import type { LaunchpadCommandArgs } from '../../../../plus/launchpad/launchpad';
+import '@shoelace-style/shoelace/dist/components/select/select.component.js';
 import { Color, getCssVariable, mix, opacity } from '../../../../system/color';
-import { createCommandLink } from '../../../../system/commands';
-import { createWebviewCommandLink } from '../../../../system/webview';
-import type {
-	GraphExcludedRef,
-	GraphExcludeTypes,
-	GraphSearchResults,
-	GraphSearchResultsError,
-	State,
-} from '../../../plus/graph/protocol';
-import {
-	OpenPullRequestDetailsCommand,
-	SearchOpenInViewCommand,
-	UpdateExcludeTypesCommand,
-	UpdateIncludedRefsCommand,
-	UpdateRefsVisibilityCommand,
-} from '../../../plus/graph/protocol';
+import type { GraphExcludedRef, State } from '../../../plus/graph/protocol';
+import { OpenPullRequestDetailsCommand, UpdateRefsVisibilityCommand } from '../../../plus/graph/protocol';
 import type { StateProvider } from '../../shared/app';
 import { GlApp } from '../../shared/app';
 import '../../shared/components/branch-icon';
@@ -41,15 +18,15 @@ import '../../shared/components/overlays/popover';
 import '../../shared/components/overlays/tooltip';
 import '../../shared/components/rich/issue-pull-request';
 import type { HostIpc } from '../../shared/ipc';
-import { emitTelemetrySentEvent } from '../../shared/telemetry';
 import type { ThemeChangeEvent } from '../../shared/theme';
 import '../shared/components/merge-rebase-status';
 import './actions/gitActionsButtons.wc';
-import './graph-wrapper';
+import './graph-app';
 import './graph-header';
+import './graph-wrapper';
 import './graph.scss';
-import { stateContext } from './context';
-import graphStyles from './graph.scss?lit';
+import './minimap/minimap-container';
+import './sidebar/sidebar';
 import {
 	GraphAppState,
 	GraphSearchingState,
@@ -57,11 +34,6 @@ import {
 	graphStateContext,
 	GraphStateProvider,
 } from './stateProvider';
-import type { CustomEventType } from '../../shared/components/element';
-import { consume, provide } from '@lit/context';
-import './sidebar/sidebar';
-import './minimap/minimap-container';
-import './graph-app';
 
 const graphLaneThemeColors = new Map([
 	['--vscode-gitlens-graphLane1Color', '#15a0bf'],
@@ -91,6 +63,9 @@ export class GraphApp extends GlApp<State> {
 		this._graphState.theming = theme;
 	}
 
+	protected override createRenderRoot(): HTMLElement | DocumentFragment {
+		return this;
+	}
 	@provide({ context: graphSearchStateContext })
 	private _graphSearchState?: typeof graphSearchStateContext.__context__;
 
@@ -101,14 +76,6 @@ export class GraphApp extends GlApp<State> {
 		this._graphSearchState = new GraphSearchingState(ipc);
 		return new GraphStateProvider(this, state, ipc);
 	}
-
-	static override styles = [
-		css`
-			gl-graph-app-wc {
-				height: 100%;
-			}
-		`,
-	];
 
 	private getGraphTheming(): { cssVariables: CssVariables; themeOpacityFactor: number } {
 		// this will be called on theme updated as well as on config updated since it is dependent on the column colors from config changes and the background color from the theme
