@@ -1,10 +1,13 @@
 import type { CssVariables } from '@gitkraken/gitkraken-components';
 import { ContextProvider, createContext } from '@lit/context';
-import { signal } from '@lit-labs/signals';
 import type { ReactiveControllerHost } from 'lit';
-import { SignalObject } from 'signal-utils/object';
 import type { SearchQuery } from '../../../../constants.search';
-import type { DidSearchParams, State } from '../../../plus/graph/protocol';
+import type {
+	GraphSearchResults,
+	GraphSearchResultsError,
+	GraphSelectedRows,
+	State,
+} from '../../../plus/graph/protocol';
 import {
 	DidChangeAvatarsNotification,
 	DidChangeBranchStateNotification,
@@ -23,11 +26,10 @@ import {
 	DidFetchNotification,
 	DidSearchNotification,
 	DidStartFeaturePreviewNotification,
-	SearchRequest,
 } from '../../../plus/graph/protocol';
 import { DidChangeHostWindowFocusNotification } from '../../../protocol';
 import type { StateProvider } from '../../shared/app';
-import { AsyncComputedState } from '../../shared/components/signal-utils';
+import { signalObjectState, signalState } from '../../shared/components/signal-utils';
 import type { Disposable } from '../../shared/events';
 import type { HostIpc } from '../../shared/ipc';
 import { stateContext } from './context';
@@ -44,123 +46,47 @@ interface AppState {
 	theming?: { cssVariables: CssVariables; themeOpacityFactor: number };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-extraneous-class
 export class GraphAppState implements AppState {
-	private readonly _activeDay = signal<number | undefined>(undefined);
+	@signalState()
+	accessor activeDay: number | undefined;
 
-	set activeDay(activeDay: number | undefined) {
-		this._activeDay.set(activeDay);
-	}
-	get activeDay() {
-		return this._activeDay.get();
-	}
+	@signalState()
+	accessor activeRow: string | undefined = undefined;
 
-	private readonly _activeRow = signal<string | undefined>(undefined);
+	@signalState(false)
+	accessor loading = false;
 
-	set activeRow(activeRow: string | undefined) {
-		this._activeRow.set(activeRow);
-	}
-	get activeRow() {
-		return this._activeRow.get();
-	}
-	private readonly _visibleDays = new SignalObject<NonNullable<AppState['visibleDays']>>({ top: 0, bottom: 0 });
+	@signalState(false)
+	accessor searching = false;
 
-	set visibleDays(visibleDays: typeof this._visibleDays) {
-		this._visibleDays.bottom = visibleDays.bottom;
-		this._visibleDays.top = visibleDays.top;
-	}
-	get visibleDays() {
-		return { top: this._visibleDays.top, bottom: this._visibleDays.bottom };
-	}
+	@signalObjectState()
+	accessor visibleDays: AppState['visibleDays'];
 
-	private readonly _theming = new SignalObject<NonNullable<AppState['theming']>>({
-		cssVariables: {},
-		themeOpacityFactor: 1,
-	});
+	@signalObjectState()
+	accessor theming: AppState['theming'];
 
-	set theming(theming: typeof this._theming) {
-		this._theming.cssVariables = theming.cssVariables;
-		this._theming.themeOpacityFactor = theming.themeOpacityFactor;
-	}
-	get theming() {
-		return { themeOpacityFactor: this._theming.themeOpacityFactor, cssVariables: this._theming.cssVariables };
-	}
+	@signalObjectState(
+		{ query: '' },
+		{
+			// afterChange: () => {
+			// 	this.searchResultsHidden = false;
+			// },
+		},
+	)
+	accessor filter!: SearchQuery;
+
+	@signalState(false)
+	accessor searchResultsHidden = false;
+
+	@signalState()
+	accessor searchResults: undefined | GraphSearchResults | GraphSearchResultsError;
+
+	@signalState()
+	accessor selectedRows: undefined | GraphSelectedRows;
 }
+
 export const graphStateContext = createContext<GraphAppState>('graphState');
-
-export class GraphSearchingState extends AsyncComputedState<DidSearchParams> {
-	private readonly _disposable: Disposable | undefined;
-
-	constructor(private readonly _ipc: HostIpc) {
-		super(
-			async _abortSignal => {
-				if (this.valid) {
-					const rsp = await this._ipc.sendRequest(SearchRequest, {
-						search: this.filter,
-						more: this._loadMore.get(),
-					});
-					this._loadMore.set(false);
-					// this._ipc.sendCommand();
-					return rsp;
-				}
-				return { results: undefined, selectedRows: undefined };
-			},
-			{ debounce: 250 },
-		);
-	}
-
-	private _loadMore = signal(false);
-
-	loadMore() {
-		this._loadMore.set(true);
-		this.run(true);
-	}
-
-	get valid() {
-		return this._filter.query.length >= 3;
-	}
-
-	get loading() {
-		return this.computed.status === 'pending';
-	}
-
-	dispose() {
-		this._disposable?.dispose();
-	}
-
-	private readonly _filter = new SignalObject<SearchQuery>({ query: '' });
-	get filter(): SearchQuery {
-		return {
-			query: this._filter.query,
-			matchAll: this._filter.matchAll,
-			matchCase: this._filter.matchCase,
-			matchRegex: this._filter.matchRegex,
-			filter: this._filter.filter,
-		};
-	}
-
-	private readonly _searchResultsHidden = signal(false);
-	get searchResultsHidden() {
-		return this._searchResultsHidden.get();
-	}
-	set searchResultsHidden(searchResultsHidden: boolean) {
-		this._searchResultsHidden.set(searchResultsHidden);
-	}
-
-	set filter(query: SearchQuery) {
-		const invalidate = query.query !== this._filter.query;
-		this._filter.filter = query.filter;
-		this._filter.matchAll = query.matchAll;
-		this._filter.matchCase = query.matchCase;
-		this._filter.matchRegex = query.matchRegex;
-		this._filter.query = query.query;
-		this.searchResultsHidden = false;
-		if (invalidate) {
-			this.run(true);
-		}
-	}
-}
-
-export const graphSearchStateContext = createContext<GraphSearchingState>('searchState');
 
 export class GraphStateProvider implements StateProvider<State> {
 	private readonly disposable: Disposable;

@@ -17,6 +17,7 @@ import type { SearchQuery } from '../../../../constants.search';
 import { isSubscriptionPaid } from '../../../../plus/gk/utils/subscription.utils';
 import type { LaunchpadCommandArgs } from '../../../../plus/launchpad/launchpad';
 import { createCommandLink } from '../../../../system/commands';
+import { debounce } from '../../../../system/function';
 import { createWebviewCommandLink } from '../../../../system/webview';
 import type {
 	GraphExcludedRef,
@@ -25,27 +26,32 @@ import type {
 	GraphSearchResults,
 	GraphSearchResultsError,
 	State,
+	UpdateGraphConfigurationParams,
 } from '../../../plus/graph/protocol';
 import {
+	EnsureRowRequest,
 	OpenPullRequestDetailsCommand,
 	SearchOpenInViewCommand,
+	SearchRequest,
 	UpdateExcludeTypesCommand,
 	UpdateGraphConfigurationCommand,
+	UpdateGraphSearchModeCommand,
 	UpdateIncludedRefsCommand,
 	UpdateRefsVisibilityCommand,
 } from '../../../plus/graph/protocol';
 import '../../shared/components/branch-icon';
 import '../../shared/components/button';
+import '../../shared/components/checkbox/checkbox';
 import '../../shared/components/code-icon';
 import type { CustomEventType } from '../../shared/components/element';
 import '../../shared/components/menu';
-import '../../shared/components/checkbox/checkbox';
-import '../../shared/components/radio/radio-group';
-import '../../shared/components/radio/radio';
 import '../../shared/components/overlays/popover';
-import '../../shared/components/search/search-box';
 import '../../shared/components/overlays/tooltip';
+import '../../shared/components/radio/radio';
+import '../../shared/components/radio/radio-group';
+import type { RadioGroup } from '../../shared/components/radio/radio-group';
 import '../../shared/components/rich/issue-pull-request';
+import '../../shared/components/search/search-box';
 import type { SearchNavigationEventDetail } from '../../shared/components/search/search-input';
 import { ipcContext } from '../../shared/context';
 import { emitTelemetrySentEvent } from '../../shared/telemetry';
@@ -55,21 +61,19 @@ import { stateContext } from './context';
 import './graph-wrapper';
 import './graph.scss';
 import graphStyles from './graph.scss?lit';
-import type { GraphSearchingState } from './stateProvider';
-import { graphSearchStateContext, graphStateContext } from './stateProvider';
-import type { RadioGroup } from '../../shared/components/radio/radio-group';
+import { graphStateContext } from './stateProvider';
 
-function getSearchResultModel(state: GraphSearchingState['state']): {
+function getSearchResultModel(searchResults: State['searchResults']): {
 	results: undefined | GraphSearchResults;
 	resultsError: undefined | GraphSearchResultsError;
 } {
 	let results: undefined | GraphSearchResults;
 	let resultsError: undefined | GraphSearchResultsError;
-	if (state?.results != null) {
-		if ('error' in state.results) {
-			resultsError = state.results;
+	if (searchResults != null) {
+		if ('error' in searchResults) {
+			resultsError = searchResults;
 		} else {
-			results = state.results;
+			results = searchResults;
 		}
 	}
 	return { results: results, resultsError: resultsError };
@@ -120,8 +124,8 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 		this._ipc.sendCommand(OpenPullRequestDetailsCommand, { id: pr.id });
 	}
 
-	private onSearchOpenInView(search: SearchQuery) {
-		this._ipc.sendCommand(SearchOpenInViewCommand, { search: search });
+	private onSearchOpenInView() {
+		this._ipc.sendCommand(SearchOpenInViewCommand, { search: { ...this.appState.filter } });
 	}
 
 	private onExcludeTypesChanged(key: keyof GraphExcludeTypes, value: boolean) {
@@ -133,10 +137,10 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 	}
 
 	private get searchResults() {
-		return getSearchResultModel(this.graphSearchingState.state).results;
+		return getSearchResultModel(this.appState.searchResults).results;
 	}
 	private get searchResultsError() {
-		return getSearchResultModel(this.graphSearchingState.state).resultsError;
+		return getSearchResultModel(this.appState.searchResults).resultsError;
 	}
 
 	private getActiveRowInfo(): undefined | { date: number; id: string } {
@@ -173,13 +177,9 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 		return index;
 	}
 
-	@consume({ context: graphSearchStateContext })
-	private graphSearchingState!: typeof graphSearchStateContext.__context__;
-
 	private getClosestSearchResultIndex(
 		results: GraphSearchResults,
 		query: undefined | SearchQuery,
-		activeRow: undefined | string,
 		next: boolean = true,
 	): [number, undefined | string] {
 		if (results.ids == null) return [0, undefined];
@@ -235,18 +235,18 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 	}
 
 	private get searchPosition(): number {
-		if (this.searchResults?.ids == null || !this.graphSearchingState.filter.query) return 0;
+		if (this.searchResults?.ids == null || !this.appState.filter.query) return 0;
 
 		const id = this.getActiveRowInfo()?.id;
 		let searchIndex = id ? this.searchResults.ids[id]?.i : undefined;
 		if (searchIndex == null) {
-			[searchIndex] = this.getClosestSearchResultIndex(
-				this.searchResults,
-				this.graphSearchingState.filter,
-				this.appState.activeRow,
-			);
+			[searchIndex] = this.getClosestSearchResultIndex(this.searchResults, { ...this.appState.filter });
 		}
 		return searchIndex < 1 ? 1 : searchIndex + 1;
+	}
+
+	get searchValid() {
+		return this.appState.filter.query.length > 2;
 	}
 
 	override render() {
@@ -282,7 +282,7 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 											repo!.provider!.integration?.connected,
 											() =>
 												html` <gl-indicator
-													.style=${`
+													style=${`
 														margin-left: -0.2rem;
 														--gl-indicator-color: green;
 														--gl-indicator-size: 0.4rem;
@@ -572,7 +572,7 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 							<gl-tooltip placement="top" content="Branches Visibility">
 								<sl-select
 									value=${ifDefined(this.state.branchesVisibility)}
-									onSlChange=${() => this.handleBranchesVisibility()}
+									@sl-change=${this.handleBranchesVisibility}
 									hoist
 								>
 									<code-icon icon="chevron-down" slot="expand-icon"></code-icon>
@@ -740,18 +740,18 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 							<gl-search-box
 								step=${this.searchPosition}
 								total=${this.searchResults?.count ?? 0}
-								valid=${Boolean(this.graphSearchingState.valid)}
+								valid=${Boolean(this.searchValid)}
 								?more=${this.searchResults?.paging?.hasMore ?? false}
-								?searching=${this.graphSearchingState.loading}
-								?filter=${this.state.defaultSearchMode === 'filter'}
-								value=${this.graphSearchingState.filter.query}
+								?searching=${this.appState.searching}
+								?filter=${this.appState.filter.filter}
+								value=${this.appState.filter.query}
 								errorMessage=${this.searchResultsError?.error ?? ''}
-								?resultsHidden=${this.graphSearchingState.searchResultsHidden}
+								?resultsHidden=${this.appState.searchResultsHidden}
 								?resultsLoaded=${this.searchResults != null}
 								@gl-search-inputchange=${(e: CustomEventType<'gl-search-inputchange'>) =>
 									this.handleSearchInput(e)}
 								@gl-search-navigate=${this.handleSearchNavigation}
-								@gl-search-openinview=${() => this.onSearchOpenInView()}
+								@gl-search-openinview=${this.onSearchOpenInView}
 								@gl-search-modechange=${this.handleSearchModeChange}
 							></gl-search-box>
 							<span>
@@ -878,44 +878,89 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 			</div>
 		</header>`;
 	}
-	handleFilterChange() {
-		throw new Error('Method not implemented.');
+	handleFilterChange(e: CustomEvent) {
+		const $el = e.target as HTMLInputElement;
+		if ($el == null) return;
+
+		const { checked } = $el;
+
+		switch ($el.value) {
+			case 'mergeCommits':
+				this.onGraphConfigurationChanged({ dimMergeCommits: checked });
+				break;
+
+			case 'onlyFollowFirstParent':
+				this.onGraphConfigurationChanged({ onlyFollowFirstParent: checked });
+				break;
+
+			case 'remotes':
+			case 'stashes':
+			case 'tags': {
+				const key = $el.value satisfies keyof GraphExcludeTypes;
+				const currentFilter = this.state.excludeTypes?.[key];
+				if ((currentFilter == null && checked) || (currentFilter != null && currentFilter !== checked)) {
+					this.onExcludeTypesChanged(key, checked);
+				}
+				break;
+			}
+		}
 	}
-	handleOnToggleRefsVisibilityClick(event: any, refs: GraphExcludedRef[], visible: boolean) {
+	handleOnToggleRefsVisibilityClick(_event: any, refs: GraphExcludedRef[], visible: boolean) {
 		this._ipc.sendCommand(UpdateRefsVisibilityCommand, {
 			refs: refs,
 			visible: visible,
 		});
 	}
-	handleBranchesVisibility() {
-		throw new Error('Method not implemented.');
+	handleBranchesVisibility(e: CustomEvent) {
+		const $el = e.target as HTMLSelectElement;
+		if ($el == null) return;
+		this.onRefIncludesChanged($el.value as GraphBranchesVisibility);
 	}
 
+	async _handleSearch() {
+		this.appState.searching = this.searchValid;
+		this.appState.searchResultsHidden = false;
+		try {
+			const rsp = await this._ipc.sendRequest(SearchRequest, {
+				search: this.searchValid ? { ...this.appState.filter } : undefined /*limit: options?.limit*/,
+			});
+			console.log({ rsp: rsp });
+			this.appState.searchResults = rsp.results;
+			this.appState.selectedRows = rsp.selectedRows;
+		} catch {
+			this.state.searchResults = undefined;
+		}
+		this.appState.searching = false;
+	}
+	private readonly handleSearch = debounce(this._handleSearch.bind(this), 250);
+
 	private handleSearchInput = (e: CustomEvent<SearchQuery>) => {
-		this.graphSearchingState.filter = e.detail;
-		// this.appState.searchQuery = e.detail;
-		// setSearchResults(undefined);
-		// setSearchResultsError(undefined);
-		// setSearchResultsHidden(false);
-		// setSearching(isValid);
-		// this._ipc.sendCommand onSearch?.(isValid ? detail : undefined);
-		// this.appState.searchResultsHidden = false;
-		// this.appState.searching = true;
-		// try {
-		// 	void this._ipc.sendRequest(SearchRequest, { search: e.detail /*limit: options?.limit*/ });
-		// 	// TODO:
-		// 	// this.updateSearchResultState(rsp);
-		// } catch {
-		// 	this.state.searchResults = undefined;
+		this.appState.filter = e.detail;
+		void this.handleSearch();
 	};
 
-	handleSearchNavigation(e: CustomEvent<SearchNavigationEventDetail>) {
-		const results = this.searchResults;
+	private async onSearchPromise(search: SearchQuery, options?: { limit?: number; more?: boolean }) {
+		try {
+			const rsp = await this._ipc.sendRequest(SearchRequest, {
+				search: search,
+				limit: options?.limit,
+				more: options?.more,
+			});
+			this.appState.searchResults = rsp.results;
+			this.appState.selectedRows = rsp.selectedRows;
+			return rsp;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private async handleSearchNavigation(e: CustomEvent<SearchNavigationEventDetail>) {
+		let results = this.searchResults;
 		if (results == null) return;
 
 		const direction = e.detail?.direction ?? 'next';
 
-		const count = results.count;
+		let count = results.count;
 
 		let searchIndex;
 		let id: string | undefined;
@@ -929,12 +974,7 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 			searchIndex = -1;
 		} else {
 			next = direction === 'next';
-			[searchIndex, id] = this.getClosestSearchResultIndex(
-				results,
-				this.graphSearchingState.filter,
-				this.appState.activeRow,
-				next,
-			);
+			[searchIndex, id] = this.getClosestSearchResultIndex(results, { ...this.appState.filter }, next);
 		}
 
 		let iterations = 0;
@@ -945,58 +985,62 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 			// Indicates a boundary and we need to load more results
 			if (searchIndex === -1) {
 				if (next) {
-					if (this.graphSearchingState.filter != null && results?.paging?.hasMore) {
-						// setSearching(true);
+					// TODO:
+					if (this.appState.filter != null && results?.paging?.hasMore) {
+						this.appState.searching = true;
 						let moreResults;
-						// try {
-						// 	moreResults = await onSearchPromise?.(searchQuery, { more: true });
-						// } finally {
-						// 	setSearching(false);
-						// }
-						// if (moreResults?.results != null && !('error' in moreResults.results)) {
-						// 	if (count < moreResults.results.count) {
-						// 		results = moreResults.results;
-						// 		searchIndex = count;
-						// 		count = results.count;
-						// 	} else {
-						// 		searchIndex = 0;
-						// 	}
-						// } else {
-						// 	searchIndex = 0;
+						try {
+							moreResults = await this.onSearchPromise?.({ ...this.appState.filter }, { more: true });
+						} finally {
+							this.appState.searching = false;
+						}
+						if (moreResults?.results != null && !('error' in moreResults.results)) {
+							if (count < moreResults.results.count) {
+								results = moreResults.results;
+								searchIndex = count;
+								count = results.count;
+							} else {
+								searchIndex = 0;
+							}
+						} else {
+							searchIndex = 0;
+						}
+					} else {
+						searchIndex = 0;
+					}
+					// this.appState.filter != null seems noop
+				} else if (direction === 'last' && this.appState.filter != null && results?.paging?.hasMore) {
+					this.appState.searching = true;
+					let moreResults;
+					try {
+						moreResults = await this.onSearchPromise({ ...this.appState.filter }, { limit: 0, more: true });
+					} finally {
+						this.appState.searching = false;
+					}
+					if (moreResults?.results != null && !('error' in moreResults.results)) {
+						if (count < moreResults.results.count) {
+							results = moreResults.results;
+							count = results.count;
+						}
+						searchIndex = count;
 					}
 				} else {
-					searchIndex = 0;
+					searchIndex = count - 1;
 				}
-			} else if (direction === 'last' && this.graphSearchingState.filter != null && results?.paging?.hasMore) {
-				// setSearching(true);
-				let moreResults;
-				// try {
-				// 	moreResults = await onSearchPromise?.(searchQuery, { limit: 0, more: true });
-				// } finally {
-				// 	setSearching(false);
-				// }
-				// if (moreResults?.results != null && !('error' in moreResults.results)) {
-				// 	if (count < moreResults.results.count) {
-				// 		results = moreResults.results;
-				// 		count = results.count;
-				// 	}
-				// 	searchIndex = count;
-				// }
-			} else {
-				searchIndex = count - 1;
 			}
+
+			id = id ?? this.getSearchResultIdByIndex(results, searchIndex);
+			if (id != null) {
+				id = await this.ensureSearchResultRow(id);
+				if (id != null) break;
+			}
+
+			this.appState.searchResultsHidden = true;
+
+			searchIndex = this.getNextOrPreviousSearchResultIndex(searchIndex, next, results, {
+				...this.appState.filter,
+			});
 		}
-
-		// 	id = id ?? getSearchResultIdByIndex(results, searchIndex);
-		// 	if (id != null) {
-		// 		id = await ensureSearchResultRow(id);
-		// 		if (id != null) break;
-		// 	}
-
-		// 	setSearchResultsHidden(true);
-
-		// 	searchIndex = getNextOrPreviousSearchResultIndex(searchIndex, next, results, searchQuery);
-		// }
 
 		if (id != null) {
 			console.log('[id]', id);
@@ -1005,15 +1049,66 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 		}
 	}
 
-	handleSearchModeChange(e: any) {
-		// TODO:  loads twice ???
-		this.graphSearchingState.filter = {
-			...this.graphSearchingState.filter,
-			filter: !this.graphSearchingState.filter.filter,
-		};
+	private async onEnsureRowPromise(id: string, select: boolean) {
+		try {
+			return await this._ipc.sendRequest(EnsureRowRequest, { id: id, select: select });
+		} catch {
+			return undefined;
+		}
 	}
+
+	private readonly ensuredIds = new Set<string>();
+	private readonly ensuredSkippedIds = new Set<string>();
+
+	private async ensureSearchResultRow(id: string): Promise<string | undefined> {
+		if (this.ensuredIds.has(id)) return id;
+		if (this.ensuredSkippedIds.has(id)) return undefined;
+
+		let timeout: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+			timeout = undefined;
+			// TODO: check
+			this.appState.loading = true;
+		}, 500);
+
+		const e = await this.onEnsureRowPromise(id, false);
+		if (timeout == null) {
+			this.appState.loading = false;
+		} else {
+			clearTimeout(timeout);
+		}
+
+		if (e?.id === id) {
+			this.ensuredIds.add(id);
+			return id;
+		}
+
+		if (e != null) {
+			this.ensuredSkippedIds.add(id);
+		}
+		return undefined;
+	}
+
+	private getSearchResultIdByIndex(results: GraphSearchResults, index: number): string | undefined {
+		// Loop through the search results without using Object.entries or Object.keys and return the id at the specified index
+		const { ids } = results;
+		for (const id in ids) {
+			if (ids[id].i === index) return id;
+		}
+		return undefined;
+
+		// return Object.entries(results.ids).find(([, { i }]) => i === index)?.[0];
+	}
+
+	handleSearchModeChange(e: CustomEvent) {
+		this._ipc.sendCommand(UpdateGraphSearchModeCommand, { searchMode: e.detail.searchMode });
+	}
+
 	handleOnMinimapToggle() {
-		this._ipc.sendCommand(UpdateGraphConfigurationCommand, { changes: { minimap: !this.state.config?.minimap } });
+		this.onGraphConfigurationChanged({ minimap: !this.state.config?.minimap });
+	}
+
+	private onGraphConfigurationChanged(changes: UpdateGraphConfigurationParams['changes']) {
+		this._ipc.sendCommand(UpdateGraphConfigurationCommand, { changes: changes });
 	}
 
 	handleOnMinimapDataTypeChange(e: Event) {
@@ -1023,7 +1118,7 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 		const minimapDataType = $el.value === 'lines' ? 'lines' : 'commits';
 		if (this.state.config.minimapDataType === minimapDataType) return;
 
-		this._ipc.sendCommand(UpdateGraphConfigurationCommand, { changes: { minimapDataType: minimapDataType } });
+		this.onGraphConfigurationChanged({ minimapDataType: minimapDataType });
 	}
 
 	private handleOnMinimapAdditionalTypesChange = (e: Event) => {
@@ -1035,20 +1130,14 @@ export class GraphHeader extends SignalWatcher(LitElement) {
 		if ($el.checked) {
 			if (!this.state.config.minimapMarkerTypes.includes(value)) {
 				const minimapMarkerTypes = [...this.state.config.minimapMarkerTypes, value];
-				// setGraphConfig({ ...config, minimapMarkerTypes: minimapMarkerTypes });
-				this._ipc.sendCommand(UpdateGraphConfigurationCommand, {
-					changes: { minimapMarkerTypes: minimapMarkerTypes },
-				});
+				this.onGraphConfigurationChanged({ minimapMarkerTypes: minimapMarkerTypes });
 			}
 		} else {
 			const index = this.state.config.minimapMarkerTypes.indexOf(value);
 			if (index !== -1) {
 				const minimapMarkerTypes = [...this.state.config.minimapMarkerTypes];
 				minimapMarkerTypes.splice(index, 1);
-				// setGraphConfig({ ...graphConfig, minimapMarkerTypes: minimapMarkerTypes });
-				this._ipc.sendCommand(UpdateGraphConfigurationCommand, {
-					changes: { minimapMarkerTypes: minimapMarkerTypes },
-				});
+				this.onGraphConfigurationChanged({ minimapMarkerTypes: minimapMarkerTypes });
 			}
 		}
 	};

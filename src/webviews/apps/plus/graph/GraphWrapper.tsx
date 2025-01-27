@@ -13,7 +13,6 @@ import type {
 	OnFormatCommitDateTime,
 } from '@gitkraken/gitkraken-components';
 import GraphContainer, { CommitDateTimeSources, refZone } from '@gitkraken/gitkraken-components';
-import type { FormEvent } from 'react';
 import React, { createElement, useCallback, useEffect, useMemo, useState } from 'react';
 import { getPlatform } from '@env/platform';
 import type { DateStyle } from '../../../../config';
@@ -30,20 +29,12 @@ import type {
 	GraphComponentConfig,
 	GraphExcludedRef,
 	GraphItemContext,
-	GraphMinimapMarkerTypes,
 	GraphMissingRefsMetadata,
 	GraphRefMetadataItem,
-	GraphSearchMode,
-	GraphSearchResults,
-	GraphSearchResultsError,
 	State,
 	UpdateGraphConfigurationParams,
 } from '../../../plus/graph/protocol';
 import { GlMarkdown } from '../../shared/components/markdown/markdown.react';
-import type { RadioGroup } from '../../shared/components/radio/radio-group';
-import type { SearchModeChangeEventDetail } from '../../shared/components/search/search-box';
-import { emitTelemetrySentEvent } from '../../shared/telemetry';
-import type { GraphMinimapDaySelectedEventDetail } from './minimap/minimap';
 import type { GraphAppState } from './stateProvider';
 
 function getRemoteIcon(type: string | number) {
@@ -62,7 +53,6 @@ function getRemoteIcon(type: string | number) {
 export interface GraphWrapperProps {
 	onChangeColumns?: (colsSettings: GraphColumnsConfig) => void;
 	onChangeGraphConfiguration?: (changes: UpdateGraphConfigurationParams['changes']) => void;
-	onChangeGraphSearchMode?: (searchMode: GraphSearchMode) => void;
 	onChangeRefsVisibility?: (args: { refs: GraphExcludedRef[]; visible: boolean }) => void;
 	onChangeSelection?: (rows: GraphRow[]) => void;
 	onDoubleClickRef?: (args: { ref: GraphRef; metadata?: GraphRefMetadataItem }) => void;
@@ -342,11 +332,6 @@ export function SafeGraphWrapper(props: Readonly<State & GraphWrapperProps & Gra
 		if (searchQuery == null) return;
 
 		// onSearchOpenInView?.(searchQuery);
-	};
-
-	const handleSearchModeChange = (e: CustomEvent<SearchModeChangeEventDetail>) => {
-		const { searchMode } = e.detail;
-		props.onChangeGraphSearchMode?.(searchMode);
 	};
 
 	const ensureSearchResultRow = async (id: string): Promise<string | undefined> => {

@@ -81,7 +81,6 @@ const WebGraph = r2wc(SafeGraphWrapper, {
 	events: [
 		'onChangeColumns',
 		'onChangeGraphConfiguration',
-		'onChangeGraphSearchMode',
 		'onChangeRefsVisibility',
 		'onChangeSelection',
 		'onDoubleClickRef',
@@ -348,7 +347,6 @@ export class GLGraphWrapper extends SignalWatcher(LitElement) {
 			}}
 			@changecolumns=${$w(this.onColumnsChanged.bind(this))}
 			@changegraphconfiguration=${$w(this.onGraphConfigurationChanged.bind(this))}
-			@changegraphsearchmode=${$w(this.onGraphSearchModeChanged.bind(this))}
 			@changerefsvisibility=${$w(this.onRefsVisibilityChanged.bind(this))}
 			@changeselection=${$w(this.onSelectionChanged.bind(this))}
 			@doubleclickref=${$w(this.onDoubleClickRef.bind(this))}

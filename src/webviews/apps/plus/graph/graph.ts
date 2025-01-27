@@ -27,13 +27,7 @@ import './graph-wrapper';
 import './graph.scss';
 import './minimap/minimap-container';
 import './sidebar/sidebar';
-import {
-	GraphAppState,
-	GraphSearchingState,
-	graphSearchStateContext,
-	graphStateContext,
-	GraphStateProvider,
-} from './stateProvider';
+import { GraphAppState, graphStateContext, GraphStateProvider } from './stateProvider';
 
 const graphLaneThemeColors = new Map([
 	['--vscode-gitlens-graphLane1Color', '#15a0bf'],
@@ -66,14 +60,11 @@ export class GraphApp extends GlApp<State> {
 	protected override createRenderRoot(): HTMLElement | DocumentFragment {
 		return this;
 	}
-	@provide({ context: graphSearchStateContext })
-	private _graphSearchState?: typeof graphSearchStateContext.__context__;
 
 	@provide({ context: graphStateContext })
 	private readonly _graphState: typeof graphStateContext.__context__ = new GraphAppState();
 
 	protected override createStateProvider(state: State, ipc: HostIpc): StateProvider<State> {
-		this._graphSearchState = new GraphSearchingState(ipc);
 		return new GraphStateProvider(this, state, ipc);
 	}
 

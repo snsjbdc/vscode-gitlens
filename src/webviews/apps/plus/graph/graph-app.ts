@@ -1,9 +1,9 @@
 import { consume } from '@lit/context';
 import { SignalWatcher } from '@lit-labs/signals';
-import { html, LitElement } from 'lit';
-import { customElement, query } from 'lit/decorators.js';
 import '@shoelace-style/shoelace/dist/components/option/option.component.js';
 import '@shoelace-style/shoelace/dist/components/select/select.component.js';
+import { html, LitElement } from 'lit';
+import { customElement, query } from 'lit/decorators.js';
 import '../../shared/components/branch-icon';
 import '../../shared/components/button';
 import '../../shared/components/code-icon';
@@ -157,9 +157,12 @@ export class GraphAppWC extends SignalWatcher(LitElement) {
 				.dataType=${this.state.config?.minimapDataType ?? 'commits'}
 				.markerTypes=${this.state.config?.minimapMarkerTypes ?? []}
 				.refMetadata=${this.state.refsMetadata}
-				.searchResults=${this.state.searchResults}
+				.searchResults=${this.graphApp.searchResults}
 				@gl-graph-minimap-selected=${this.handleOnMinimapDaySelected}
-				.visibleDays=${this.graphApp.visibleDays}
+				.visibleDays=${this.graphApp.visibleDays && {
+					top: this.graphApp.visibleDays.top,
+					bottom: this.graphApp.visibleDays.bottom,
+				}}
 			></gl-graph-minimap-container>
 			<gl-graph-hover id="commit-hover" distance=${0} skidding=${15}></gl-graph-hover>
 			<main id="main" class="graph-app__main">
