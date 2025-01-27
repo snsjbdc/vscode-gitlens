@@ -1,16 +1,19 @@
 import { QuickInputButtons } from 'vscode';
 import type { Container } from '../../container';
+import type { IssueShape } from '../../git/models/issue';
 import type { GitBranchReference, GitReference } from '../../git/models/reference';
-import {
-	getNameWithoutRemote,
-	getReferenceLabel,
-	isBranchReference,
-	isRevisionReference,
-} from '../../git/models/reference';
 import { Repository } from '../../git/models/repository';
 import type { GitWorktree } from '../../git/models/worktree';
-import { getWorktreesByBranch } from '../../git/models/worktree';
+import { addAssociatedIssueToBranch } from '../../git/utils/-webview/branch.issue.utils';
+import { getWorktreesByBranch } from '../../git/utils/-webview/worktree.utils';
+import {
+	getReferenceLabel,
+	getReferenceNameWithoutRemote,
+	isBranchReference,
+	isRevisionReference,
+} from '../../git/utils/reference.utils';
 import { showGenericErrorMessage } from '../../messages';
+import { getIssueOwner } from '../../plus/integrations/providers/utils';
 import type { QuickPickItemOfT } from '../../quickpicks/items/common';
 import { createQuickPickSeparator } from '../../quickpicks/items/common';
 import type { FlagsQuickPickItem } from '../../quickpicks/items/flags';
@@ -63,6 +66,13 @@ interface CreateState {
 	flags: CreateFlags[];
 
 	suggestNameOnly?: boolean;
+	suggestRepoOnly?: boolean;
+	confirmOptions?: CreateFlags[];
+	associateWithIssue?: IssueShape;
+}
+
+function isCreateState(state: Partial<State> | undefined): state is Partial<CreateState> {
+	return state?.subcommand === 'create';
 }
 
 type DeleteFlags = '--force' | '--remotes';
@@ -172,6 +182,10 @@ export class BranchGitCommand extends QuickCommand {
 						counter++;
 					}
 
+					if (args.state.suggestRepoOnly && args.state.repo != null) {
+						counter--;
+					}
+
 					break;
 				case 'delete':
 				case 'prune':
@@ -223,7 +237,7 @@ export class BranchGitCommand extends QuickCommand {
 
 	protected async *steps(state: PartialStepState<State>): StepGenerator {
 		const context: Context = {
-			associatedView: this.container.branchesView,
+			associatedView: this.container.views.branches,
 			repos: this.container.git.openRepositories,
 			showTags: false,
 			title: this.title,
@@ -251,7 +265,12 @@ export class BranchGitCommand extends QuickCommand {
 				state.subcommand,
 			);
 
-			if (state.counter < 2 || state.repo == null || typeof state.repo === 'string') {
+			if (
+				state.counter < 2 ||
+				state.repo == null ||
+				typeof state.repo === 'string' ||
+				(isCreateState(state) && state.suggestRepoOnly)
+			) {
 				skippedStepTwo = false;
 				if (context.repos.length === 1) {
 					skippedStepTwo = true;
@@ -347,10 +366,9 @@ export class BranchGitCommand extends QuickCommand {
 		while (this.canStepsContinue(state)) {
 			if (state.counter < 3 || state.reference == null) {
 				const result = yield* pickBranchOrTagStep(state, context, {
-					placeholder: context =>
-						`Choose a branch${context.showTags ? ' or tag' : ''} to create the new branch from`,
-					picked: state.reference?.ref ?? (await state.repo.git.getBranch())?.ref,
-					titleContext: ' from',
+					placeholder: `Choose a base to create the new branch from`,
+					picked: state.reference?.ref ?? (await state.repo.git.branches().getBranch())?.ref,
+					title: 'Select Base to Create Branch From',
 					value: isRevisionReference(state.reference) ? state.reference.ref : undefined,
 				});
 				// Always break on the first step (so we will go back)
@@ -359,9 +377,9 @@ export class BranchGitCommand extends QuickCommand {
 				state.reference = result;
 			}
 
-			if (state.counter < 4 || state.name == null) {
+			if (state.counter < 4 || state.name == null || state.suggestNameOnly) {
 				const result = yield* inputBranchNameStep(state, context, {
-					titleContext: ` from ${getReferenceLabel(state.reference, {
+					title: `${context.title} from ${getReferenceLabel(state.reference, {
 						capitalize: true,
 						icon: false,
 						label: state.reference.refType !== 'branch',
@@ -369,7 +387,7 @@ export class BranchGitCommand extends QuickCommand {
 					value:
 						state.name ?? // if it's a remote branch, pre-fill the name
 						(isBranchReference(state.reference) && state.reference.remote
-							? getNameWithoutRemote(state.reference)
+							? getReferenceNameWithoutRemote(state.reference)
 							: undefined),
 				});
 				if (result === StepResultBreak) continue;
@@ -398,41 +416,62 @@ export class BranchGitCommand extends QuickCommand {
 					},
 					this.pickedVia,
 				);
-				if (worktreeResult === StepResultBreak) continue;
+				if (worktreeResult !== StepResultBreak) continue;
 
 				endSteps(state);
 				return;
 			}
 
 			endSteps(state);
+
 			if (state.flags.includes('--switch')) {
 				await state.repo.switch(state.reference.ref, { createBranch: state.name });
 			} else {
 				try {
-					await state.repo.git.createBranch(state.name, state.reference.ref);
+					await state.repo.git.branches().createBranch?.(state.name, state.reference.ref);
 				} catch (ex) {
 					Logger.error(ex);
 					// TODO likely need some better error handling here
 					return showGenericErrorMessage('Unable to create branch');
 				}
 			}
+
+			if (state.associateWithIssue != null) {
+				const issue = state.associateWithIssue;
+				const branch = await state.repo.git.branches().getBranch(state.name);
+				// TODO: These descriptors are hacked in. Use an integration function to get the right resource for the issue.
+				const owner = getIssueOwner(issue);
+				if (branch != null && owner != null) {
+					await addAssociatedIssueToBranch(this.container, branch, { ...issue, type: 'issue' }, owner);
+				}
+			}
 		}
 	}
 
 	private *createCommandConfirmStep(state: CreateStepState, context: Context): StepResultGenerator<CreateFlags[]> {
-		const step: QuickPickStep<FlagsQuickPickItem<CreateFlags>> = createConfirmStep(
-			appendReposToTitle(`Confirm ${context.title}`, state, context),
-			[
+		const confirmItems = [];
+		if (!state.confirmOptions) {
+			confirmItems.push(
 				createFlagsQuickPickItem<CreateFlags>(state.flags, [], {
 					label: context.title,
 					detail: `Will create a new branch named ${state.name} from ${getReferenceLabel(state.reference)}`,
 				}),
+			);
+		}
+
+		if (!state.confirmOptions || state.confirmOptions.includes('--switch')) {
+			confirmItems.push(
 				createFlagsQuickPickItem<CreateFlags>(state.flags, ['--switch'], {
 					label: `Create & Switch to Branch`,
 					detail: `Will create and switch to a new branch named ${state.name} from ${getReferenceLabel(
 						state.reference,
 					)}`,
 				}),
+			);
+		}
+
+		if (!state.confirmOptions || state.confirmOptions.includes('--worktree')) {
+			confirmItems.push(
 				createFlagsQuickPickItem<CreateFlags>(state.flags, ['--worktree'], {
 					label: `${context.title} in New Worktree`,
 					description: 'avoids modifying your working tree',
@@ -440,7 +479,12 @@ export class BranchGitCommand extends QuickCommand {
 						state.reference,
 					)}`,
 				}),
-			],
+			);
+		}
+
+		const step: QuickPickStep<FlagsQuickPickItem<CreateFlags>> = createConfirmStep(
+			appendReposToTitle(`Confirm ${context.title}`, state, context),
+			confirmItems,
 			context,
 		);
 		const selection: StepSelection<typeof step> = yield step;
@@ -621,7 +665,7 @@ export class BranchGitCommand extends QuickCommand {
 
 			if (state.counter < 4 || state.name == null) {
 				const result = yield* inputBranchNameStep(state, context, {
-					titleContext: ` ${getReferenceLabel(state.reference, false)}`,
+					title: `${context.title} ${getReferenceLabel(state.reference, false)}`,
 					value: state.name ?? state.reference.name,
 				});
 				if (result === StepResultBreak) continue;
@@ -636,7 +680,7 @@ export class BranchGitCommand extends QuickCommand {
 
 			endSteps(state);
 			try {
-				await state.repo.git.renameBranch(state.reference.ref, state.name);
+				await state.repo.git.branches().renameBranch?.(state.reference.ref, state.name);
 			} catch (ex) {
 				Logger.error(ex);
 				// TODO likely need some better error handling here

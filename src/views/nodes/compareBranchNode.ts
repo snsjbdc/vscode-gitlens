@@ -2,13 +2,13 @@ import type { Disposable, TreeCheckboxChangeEvent } from 'vscode';
 import { ThemeIcon, TreeItem, TreeItemCollapsibleState } from 'vscode';
 import type { ViewShowBranchComparison } from '../../config';
 import { GlyphChars } from '../../constants';
-import type { StoredBranchComparison, StoredBranchComparisons } from '../../constants.storage';
+import type { StoredBranchComparison, StoredBranchComparisons, StoredNamedRef } from '../../constants.storage';
 import type { GitUri } from '../../git/gitUri';
 import type { GitBranch } from '../../git/models/branch';
-import { createRevisionRange, shortenRevision } from '../../git/models/reference';
 import type { GitUser } from '../../git/models/user';
 import type { CommitsQueryResults, FilesQueryResults } from '../../git/queryResults';
 import { getCommitsQuery, getFilesQuery } from '../../git/queryResults';
+import { createRevisionRange, shortenRevision } from '../../git/utils/revision.utils';
 import { CommandQuickPickItem } from '../../quickpicks/items/common';
 import { showReferencePicker } from '../../quickpicks/referencePicker';
 import { debug, log } from '../../system/decorators/log';
@@ -73,9 +73,17 @@ export class CompareBranchNode extends SubscribeableViewNode<
 		};
 	}
 
+	get compareRef(): StoredNamedRef {
+		return { label: this.branch.name, ref: this.branch.sha! };
+	}
+
 	private _compareWith: StoredBranchComparison | undefined;
 	get compareWith(): StoredBranchComparison | undefined {
 		return this._compareWith;
+	}
+
+	get compareWithRef(): StoredNamedRef | undefined {
+		return this._compareWith != null ? { label: this._compareWith.label, ref: this._compareWith.ref } : undefined;
 	}
 
 	private _isFiltered: boolean | undefined;
@@ -102,7 +110,7 @@ export class CompareBranchNode extends SubscribeableViewNode<
 	private onNodesCheckedStateChanged(e: TreeCheckboxChangeEvent<ViewNode>) {
 		const prefix = getComparisonStoragePrefix(this.getStorageId());
 		if (e.items.some(([n]) => n.id?.startsWith(prefix))) {
-			void this.storeCompareWith(false);
+			void this.storeCompareWith(false).catch();
 		}
 	}
 
@@ -110,18 +118,23 @@ export class CompareBranchNode extends SubscribeableViewNode<
 		if (this._compareWith == null) return [];
 
 		if (this.children == null) {
-			const ahead = this.ahead;
-			const behind = this.behind;
+			const ahead = {
+				...this.ahead,
+				range: createRevisionRange(this.ahead.ref1, this.compareWithWorkingTree ? '' : this.ahead.ref2, '..'),
+			};
+			const behind = { ...this.behind, range: createRevisionRange(this.behind.ref1, this.behind.ref2, '..') };
 
-			const counts = await this.view.container.git.getLeftRightCommitCount(
-				this.branch.repoPath,
-				createRevisionRange(behind.ref1, behind.ref2, '...'),
-				{ authors: this.filterByAuthors },
-			);
+			const counts = await this.view.container.git
+				.commits(this.repoPath)
+				.getLeftRightCommitCount(createRevisionRange(behind.ref1, behind.ref2, '...'), {
+					authors: this.filterByAuthors,
+				});
+
+			const branchesProvider = this.view.container.git.branches(this.repoPath);
 			const mergeBase =
-				(await this.view.container.git.getMergeBase(this.repoPath, behind.ref1, behind.ref2, {
+				(await branchesProvider.getMergeBase(behind.ref1, behind.ref2, {
 					forkPoint: true,
-				})) ?? (await this.view.container.git.getMergeBase(this.repoPath, behind.ref1, behind.ref2));
+				})) ?? (await branchesProvider.getMergeBase(behind.ref1, behind.ref2));
 
 			const children: ViewNode[] = [
 				new ResultsCommitsNode(
@@ -130,7 +143,7 @@ export class CompareBranchNode extends SubscribeableViewNode<
 					this.repoPath,
 					'Behind',
 					{
-						query: this.getCommitsQuery(createRevisionRange(behind.ref1, behind.ref2, '..')),
+						query: this.getCommitsQuery(behind.range),
 						comparison: behind,
 						direction: 'behind',
 						files: {
@@ -150,9 +163,7 @@ export class CompareBranchNode extends SubscribeableViewNode<
 					this.repoPath,
 					'Ahead',
 					{
-						query: this.getCommitsQuery(
-							createRevisionRange(ahead.ref1, this.compareWithWorkingTree ? '' : ahead.ref2, '..'),
-						),
+						query: this.getCommitsQuery(ahead.range),
 						comparison: ahead,
 						direction: 'ahead',
 						files: {
@@ -246,7 +257,7 @@ export class CompareBranchNode extends SubscribeableViewNode<
 
 	@log()
 	clearReviewed() {
-		void this.storeCompareWith(true);
+		void this.storeCompareWith(true).catch();
 		void this.triggerChange();
 	}
 
@@ -347,7 +358,7 @@ export class CompareBranchNode extends SubscribeableViewNode<
 					stats = {
 						additions: stats.additions + workingStats.additions,
 						deletions: stats.deletions + workingStats.deletions,
-						changedFiles: files.length,
+						files: files.length,
 						approximated: true,
 					};
 				}

@@ -1,19 +1,21 @@
 /* eslint-disable @typescript-eslint/no-deprecated */
 import type { Range } from 'vscode';
 import type { Container } from '../../container';
+import { relative } from '../../system/-webview/path';
 import { filterMap } from '../../system/array';
 import { normalizePath } from '../../system/path';
 import { maybeStopWatch } from '../../system/stopwatch';
 import { getLines } from '../../system/string';
-import { relative } from '../../system/vscode/path';
 import type { GitCommitLine, GitStashCommit } from '../models/commit';
 import { GitCommit, GitCommitIdentity } from '../models/commit';
-import { uncommitted } from '../models/constants';
-import type { GitFile, GitFileChangeStats } from '../models/file';
-import { GitFileChange, GitFileIndexStatus } from '../models/file';
+import type { GitFile } from '../models/file';
+import type { GitFileChangeStats } from '../models/fileChange';
+import { GitFileChange } from '../models/fileChange';
+import { GitFileIndexStatus } from '../models/fileStatus';
 import type { GitLog } from '../models/log';
+import { uncommitted } from '../models/revision';
 import type { GitUser } from '../models/user';
-import { isUserMatch } from '../models/user';
+import { isUserMatch } from '../utils/user.utils';
 
 const diffRegex = /diff --git a\/(.*) b\/(.*)/;
 const diffRangeRegex = /^@@ -(\d+?),(\d+?) \+(\d+?),(\d+?) @@/;
@@ -77,8 +79,18 @@ export type Parser<T> = {
 };
 
 export type ParsedEntryFile = { status: string; path: string; originalPath?: string };
+export type ParsedEntryFileWithStats = ParsedEntryFile & { additions: number; deletions: number };
+export type ParsedEntryFileWithMaybeStats = ParsedEntryFile & { additions?: number; deletions?: number };
+
 export type ParsedEntryWithFiles<T> = { [K in keyof T]: string } & { files: ParsedEntryFile[] };
+export type ParsedEntryWithFilesAndStats<T> = { [K in keyof T]: string } & { files: ParsedEntryFileWithStats[] };
+export type ParsedEntryWithFilesAndMaybeStats<T> = { [K in keyof T]: string } & {
+	files: ParsedEntryFileWithMaybeStats[];
+};
+
 export type ParserWithFiles<T> = Parser<ParsedEntryWithFiles<T>>;
+export type ParserWithFilesAndStats<T> = Parser<ParsedEntryWithFilesAndStats<T>>;
+export type ParserWithFilesAndMaybeStats<T> = Parser<ParsedEntryWithFilesAndMaybeStats<T>>;
 
 export type ParsedStats = { files: number; additions: number; deletions: number };
 export type ParsedEntryWithMaybeStats<T> = T & { stats?: ParsedStats };
@@ -98,25 +110,21 @@ let _contributorsParser: ContributorsParserMaybeWithStats | undefined;
 let _contributorsParserWithStats: ContributorsParserMaybeWithStats | undefined;
 export function getContributorsParser(stats?: boolean): ContributorsParserMaybeWithStats {
 	if (stats) {
-		if (_contributorsParserWithStats == null) {
-			_contributorsParserWithStats = createLogParserWithStats({
-				sha: '%H',
-				author: '%aN',
-				email: '%aE',
-				date: '%at',
-			});
-		}
-		return _contributorsParserWithStats;
-	}
-
-	if (_contributorsParser == null) {
-		_contributorsParser = createLogParser({
+		_contributorsParserWithStats ??= createLogParserWithStats({
 			sha: '%H',
 			author: '%aN',
 			email: '%aE',
 			date: '%at',
 		});
+		return _contributorsParserWithStats;
 	}
+
+	_contributorsParser ??= createLogParser({
+		sha: '%H',
+		author: '%aN',
+		email: '%aE',
+		date: '%at',
+	});
 	return _contributorsParser;
 }
 
@@ -136,23 +144,7 @@ let _graphParserWithStats: GraphParserMaybeWithStats | undefined;
 
 export function getGraphParser(stats?: boolean): GraphParserMaybeWithStats {
 	if (stats) {
-		if (_graphParserWithStats == null) {
-			_graphParserWithStats = createLogParserWithStats({
-				sha: '%H',
-				author: '%aN',
-				authorEmail: '%aE',
-				authorDate: '%at',
-				committerDate: '%ct',
-				parents: '%P',
-				tips: '%D',
-				message: '%B',
-			});
-		}
-		return _graphParserWithStats;
-	}
-
-	if (_graphParser == null) {
-		_graphParser = createLogParser({
+		_graphParserWithStats ??= createLogParserWithStats({
 			sha: '%H',
 			author: '%aN',
 			authorEmail: '%aE',
@@ -162,16 +154,26 @@ export function getGraphParser(stats?: boolean): GraphParserMaybeWithStats {
 			tips: '%D',
 			message: '%B',
 		});
+		return _graphParserWithStats;
 	}
+
+	_graphParser ??= createLogParser({
+		sha: '%H',
+		author: '%aN',
+		authorEmail: '%aE',
+		authorDate: '%at',
+		committerDate: '%ct',
+		parents: '%P',
+		tips: '%D',
+		message: '%B',
+	});
 	return _graphParser;
 }
 
 let _graphStatsParser: ParserWithStats<{ sha: string }> | undefined;
 
 export function getGraphStatsParser(): ParserWithStats<{ sha: string }> {
-	if (_graphStatsParser == null) {
-		_graphStatsParser = createLogParserWithStats({ sha: '%H' });
-	}
+	_graphStatsParser ??= createLogParserWithStats({ sha: '%H' });
 	return _graphStatsParser;
 }
 
@@ -179,9 +181,7 @@ type RefParser = Parser<string>;
 
 let _refParser: RefParser | undefined;
 export function getRefParser(): RefParser {
-	if (_refParser == null) {
-		_refParser = createLogParserSingle('%H');
-	}
+	_refParser ??= createLogParserSingle('%H');
 	return _refParser;
 }
 
@@ -189,13 +189,11 @@ type RefAndDateParser = Parser<{ sha: string; authorDate: string; committerDate:
 
 let _refAndDateParser: RefAndDateParser | undefined;
 export function getRefAndDateParser(): RefAndDateParser {
-	if (_refAndDateParser == null) {
-		_refAndDateParser = createLogParser({
-			sha: '%H',
-			authorDate: '%at',
-			committerDate: '%ct',
-		});
-	}
+	_refAndDateParser ??= createLogParser({
+		sha: '%H',
+		authorDate: '%at',
+		committerDate: '%ct',
+	});
 	return _refAndDateParser;
 }
 
@@ -281,16 +279,20 @@ export function createLogParserSingle(field: string): Parser<string> {
 }
 
 export function createLogParserWithFiles<T extends Record<string, unknown>>(
-	fieldMapping: ExtractAll<T, string>,
+	fieldMapping?: ExtractAll<T, string>,
 ): ParserWithFiles<T> {
-	let format = '%x00';
+	let args: string[] = [];
 	const keys: (keyof ExtractAll<T, string>)[] = [];
-	for (const key in fieldMapping) {
-		keys.push(key);
-		format += `%x00${fieldMapping[key]}`;
+	if (fieldMapping != null) {
+		let format = '%x00';
+		for (const key in fieldMapping) {
+			keys.push(key);
+			format += `%x00${fieldMapping[key]}`;
+		}
+		args = ['-z', `--format=${format}`, '--name-status'];
+	} else {
+		args = ['-z', '--name-status'];
 	}
-
-	const args = ['-z', `--format=${format}`, '--name-status'];
 
 	function* parse(data: string | string[]): Generator<ParsedEntryWithFiles<T>> {
 		const records = getLines(data, '\0\0\0');
@@ -304,9 +306,11 @@ export function createLogParserWithFiles<T extends Record<string, unknown>>(
 			files = [];
 			fields = getLines(record, '\0');
 
-			// Skip the 2 starting NULs
-			fields.next();
-			fields.next();
+			if (fieldMapping != null) {
+				// Skip the 2 starting NULs
+				fields.next();
+				fields.next();
+			}
 
 			let fieldCount = 0;
 			let field;
@@ -325,6 +329,104 @@ export function createLogParserWithFiles<T extends Record<string, unknown>>(
 						field = fields.next();
 						file.originalPath = field.value;
 					}
+
+					files.push(file);
+				}
+			}
+
+			entry.files = files;
+			yield entry;
+		}
+	}
+
+	return { arguments: args, parse: parse };
+}
+
+export function createLogParserWithFilesAndStats<T extends Record<string, unknown>>(
+	fieldMapping?: ExtractAll<T, string>,
+): ParserWithFilesAndStats<T> {
+	let args: string[] = [];
+	const keys: (keyof ExtractAll<T, string>)[] = [];
+	if (fieldMapping != null) {
+		let format = '%x00';
+		for (const key in fieldMapping) {
+			keys.push(key);
+			format += `%x00${fieldMapping[key]}`;
+		}
+		args = ['-z', `--format=${format}`, '--numstat'];
+	} else {
+		args = ['-z', '--numstat'];
+	}
+
+	function* parse(data: string | string[]): Generator<ParsedEntryWithFilesAndStats<T>> {
+		const records = getLines(data, '\0\0\0');
+
+		let entry: ParsedEntryWithFilesAndStats<T>;
+		let files: ParsedEntryFileWithStats[];
+		let fields: IterableIterator<string>;
+
+		for (const record of records) {
+			entry = {} as any;
+			files = [];
+			fields = getLines(record, '\0');
+
+			if (fieldMapping != null) {
+				// Skip the 2 starting NULs
+				fields.next();
+				fields.next();
+			}
+
+			let fieldCount = 0;
+			let field;
+			while (true) {
+				field = fields.next();
+				if (field.done) break;
+
+				if (fieldCount < keys.length) {
+					entry[keys[fieldCount++]] = field.value as ParsedEntryWithFilesAndStats<T>[keyof T];
+				} else {
+					let [additions, deletions, path] = field.value.split('\t');
+					additions = additions.trim();
+					deletions = deletions.trim();
+					path = path.trim();
+
+					let originalPath;
+					let status;
+					// If we don't get a path it is likely a renamed file (because `-z` screws up the format)
+					if (!path) {
+						field = fields.next();
+						path = field.value.trim();
+						field = fields.next();
+						originalPath = field.value.trim();
+						status = 'R';
+					} else {
+						// Handle renamed files which show as path/to/file => new/path/to/file
+						const renameIndex = path.indexOf(' => ');
+						if (renameIndex !== -1) {
+							originalPath = path.substring(0, renameIndex);
+							path = path.substring(renameIndex + 4);
+							status = 'R';
+						}
+					}
+
+					// Skip binary files which show as - for both additions and deletions
+					if (additions === '-' && deletions === '-') continue;
+
+					const file: ParsedEntryFileWithStats = {
+						status:
+							status ??
+							(additions === '0' && deletions === '0'
+								? 'M'
+								: additions === '0'
+								  ? 'D'
+								  : deletions === '0'
+								    ? 'A'
+								    : 'M'),
+						path: path,
+						originalPath: originalPath,
+						additions: additions === '-' ? 0 : parseInt(additions, 10),
+						deletions: deletions === '-' ? 0 : parseInt(deletions, 10),
+					};
 
 					files.push(file);
 				}
@@ -757,10 +859,11 @@ function parseLogEntry(
 		const originalFileName = entry.originalPath ?? (relativeFileName !== entry.path ? entry.path : undefined);
 
 		const files: { file?: GitFileChange; files?: GitFileChange[] } = {
-			files: entry.files?.map(f => new GitFileChange(repoPath!, f.path, f.status, f.originalPath)),
+			files: entry.files?.map(f => new GitFileChange(container, repoPath!, f.path, f.status, f.originalPath)),
 		};
 		if (type === LogType.LogFile && relativeFileName != null) {
 			files.file = new GitFileChange(
+				container,
 				repoPath!,
 				relativeFileName,
 				entry.status!,

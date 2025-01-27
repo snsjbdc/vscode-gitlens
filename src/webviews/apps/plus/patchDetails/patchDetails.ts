@@ -1,8 +1,11 @@
 /*global*/
 import type { TextDocumentShowOptions } from 'vscode';
 import type { ViewFilesLayout } from '../../../../config';
-import type { DraftPatchFileChange, DraftVisibility } from '../../../../gk/models/drafts';
-import type { State, SwitchModeParams } from '../../../../plus/webviews/patchDetails/protocol';
+import type { Commands } from '../../../../constants.commands';
+import type { DraftPatchFileChange, DraftVisibility } from '../../../../plus/drafts/models/drafts';
+import type { Serialized } from '../../../../system/-webview/serialize';
+import { debounce } from '../../../../system/function';
+import type { State, SwitchModeParams } from '../../../plus/patchDetails/protocol';
 import {
 	ApplyPatchCommand,
 	ArchiveDraftCommand,
@@ -32,9 +35,7 @@ import {
 	UpdatePatchUsersCommand,
 	UpdatePatchUserSelectionCommand,
 	UpdatePreferencesCommand,
-} from '../../../../plus/webviews/patchDetails/protocol';
-import { debounce } from '../../../../system/function';
-import type { Serialized } from '../../../../system/vscode/serialize';
+} from '../../../plus/patchDetails/protocol';
 import type { IpcMessage } from '../../../protocol';
 import { ExecuteCommand } from '../../../protocol';
 import { App } from '../../shared/appBase';
@@ -344,8 +345,8 @@ export class PatchDetailsApp extends App<Serialized<State>> {
 		this.sendCommand(SelectPatchRepoCommand, undefined);
 	}
 
-	private onCommandClickedCore(action?: string) {
-		const command = action?.startsWith('command:') ? action.slice(8) : action;
+	private onCommandClickedCore(action?: Commands | `command:${Commands}`) {
+		const command = (action?.startsWith('command:') ? action.slice(8) : action) as Commands | undefined;
 		if (command == null) return;
 
 		this.sendCommand(ExecuteCommand, { command: command });
@@ -361,10 +362,8 @@ export class PatchDetailsApp extends App<Serialized<State>> {
 
 			if (result.error) {
 				this.component.explain = { error: { message: result.error.message ?? 'Error retrieving content' } };
-			} else if (result.summary) {
-				this.component.explain = { summary: result.summary };
 			} else {
-				this.component.explain = undefined;
+				this.component.explain = result;
 			}
 		} catch (_ex) {
 			this.component.explain = { error: { message: 'Error retrieving content' } };

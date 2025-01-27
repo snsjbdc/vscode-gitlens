@@ -1,5 +1,5 @@
 import type { TextEditor, Uri } from 'vscode';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { executeGitCommand } from '../git/actions';
 import { reveal } from '../git/actions/commit';
@@ -12,11 +12,13 @@ import {
 	showGenericErrorMessage,
 	showLineUncommittedWarningMessage,
 } from '../messages';
+import { command } from '../system/-webview/command';
 import { createMarkdownCommandLink } from '../system/commands';
 import { Logger } from '../system/logger';
-import { command } from '../system/vscode/command';
-import type { CommandContext } from './base';
-import { ActiveEditorCachedCommand, getCommandUri, isCommandContextViewNodeHasCommit } from './base';
+import { ActiveEditorCachedCommand } from './commandBase';
+import { getCommandUri } from './commandBase.utils';
+import type { CommandContext } from './commandContext';
+import { isCommandContextViewNodeHasCommit } from './commandContext.utils';
 
 export interface ShowQuickCommitCommandArgs {
 	repoPath?: string;
@@ -32,15 +34,15 @@ export class ShowQuickCommitCommand extends ActiveEditorCachedCommand {
 	static createMarkdownCommandLink(args: ShowQuickCommitCommandArgs): string;
 	static createMarkdownCommandLink(argsOrSha: ShowQuickCommitCommandArgs | string, repoPath?: string): string {
 		const args = typeof argsOrSha === 'string' ? { sha: argsOrSha, repoPath: repoPath } : argsOrSha;
-		return createMarkdownCommandLink<ShowQuickCommitCommandArgs>(Commands.ShowQuickCommit, args);
+		return createMarkdownCommandLink<ShowQuickCommitCommandArgs>(GlCommand.ShowQuickCommit, args);
 	}
 
 	constructor(private readonly container: Container) {
-		super([Commands.RevealCommitInView, Commands.ShowQuickCommit]);
+		super([GlCommand.RevealCommitInView, GlCommand.ShowQuickCommit]);
 	}
 
 	protected override preExecute(context: CommandContext, args?: ShowQuickCommitCommandArgs) {
-		if (context.command === Commands.RevealCommitInView) {
+		if (context.command === GlCommand.RevealCommitInView) {
 			args = { ...args };
 			args.revealInView = true;
 		}
@@ -129,7 +131,7 @@ export class ShowQuickCommitCommand extends ActiveEditorCachedCommand {
 				}
 
 				if (args.repoLog == null) {
-					args.commit = await this.container.git.getCommit(repoPath, args.sha);
+					args.commit = await this.container.git.commits(repoPath).getCommit(args.sha);
 				}
 			}
 

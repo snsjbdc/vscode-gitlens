@@ -5,25 +5,29 @@ import type { GitBranch } from '../../../git/models/branch';
 import type { GitCommit } from '../../../git/models/commit';
 import type { GitContributor } from '../../../git/models/contributor';
 import type { GitFile } from '../../../git/models/file';
+import type { GitPausedOperation } from '../../../git/models/pausedOperationStatus';
 import type { PullRequest } from '../../../git/models/pullRequest';
 import type { GitReflogRecord } from '../../../git/models/reflog';
 import type { GitRemote } from '../../../git/models/remote';
 import type { Repository } from '../../../git/models/repository';
 import type { GitTag } from '../../../git/models/tag';
 import type { GitWorktree } from '../../../git/models/worktree';
-import type { Draft } from '../../../gk/models/drafts';
-import type { LaunchpadGroup, LaunchpadItem } from '../../../plus/launchpad/launchpadProvider';
+import type { Draft } from '../../../plus/drafts/models/drafts';
+import type { LaunchpadItem } from '../../../plus/launchpad/launchpadProvider';
+import type { LaunchpadGroup } from '../../../plus/launchpad/models/launchpad';
 import {
 	launchpadCategoryToGroupMap,
 	sharedCategoryToLaunchpadActionCategoryMap,
-} from '../../../plus/launchpad/launchpadProvider';
+} from '../../../plus/launchpad/models/launchpad';
 import type {
 	CloudWorkspace,
 	CloudWorkspaceRepositoryDescriptor,
+} from '../../../plus/workspaces/models/cloudWorkspace';
+import type {
 	LocalWorkspace,
 	LocalWorkspaceRepositoryDescriptor,
-} from '../../../plus/workspaces/models';
-import { gate } from '../../../system/decorators/gate';
+} from '../../../plus/workspaces/models/localWorkspace';
+import { gate } from '../../../system/decorators/-webview/gate';
 import { debug, logName } from '../../../system/decorators/log';
 import { is as isA } from '../../../system/function';
 import { getLoggableName } from '../../../system/logger';
@@ -60,6 +64,7 @@ export const enum ContextValues {
 	AutolinkedItem = 'gitlens:autolinked:item',
 	Branch = 'gitlens:branch',
 	Branches = 'gitlens:branches',
+	BranchOrTagFolder = 'gitlens:pseudo:folder',
 	BranchStatusAheadOfUpstream = 'gitlens:status-branch:upstream:ahead',
 	BranchStatusBehindUpstream = 'gitlens:status-branch:upstream:behind',
 	BranchStatusMissingUpstream = 'gitlens:status-branch:upstream:missing',
@@ -69,6 +74,7 @@ export const enum ContextValues {
 	CodeSuggestions = 'gitlens:drafts:code-suggestions',
 	Commit = 'gitlens:commit',
 	Commits = 'gitlens:commits',
+	CommitsCurrentBranch = 'gitlens:commits:current-branch',
 	Compare = 'gitlens:compare',
 	CompareBranch = 'gitlens:compare:branch',
 	ComparePicker = 'gitlens:compare:picker',
@@ -85,14 +91,16 @@ export const enum ContextValues {
 	Grouping = 'gitlens:grouping',
 	LaunchpadItem = 'gitlens:launchpad:item',
 	LineHistory = 'gitlens:history:line',
-	Merge = 'gitlens:merge',
 	MergeConflictCurrentChanges = 'gitlens:merge-conflict:current',
 	MergeConflictIncomingChanges = 'gitlens:merge-conflict:incoming',
 	Message = 'gitlens:message',
 	MessageSignIn = 'gitlens:message:signin',
 	Pager = 'gitlens:pager',
+	PausedOperationCherryPick = 'gitlens:paused-operation:cherry-pick',
+	PausedOperationMerge = 'gitlens:paused-operation:merge',
+	PausedOperationRebase = 'gitlens:paused-operation:rebase',
+	PausedOperationRevert = 'gitlens:paused-operation:revert',
 	PullRequest = 'gitlens:pullrequest',
-	Rebase = 'gitlens:rebase',
 	Reflog = 'gitlens:reflog',
 	ReflogRecord = 'gitlens:reflog-record',
 	Remote = 'gitlens:remote',
@@ -137,13 +145,13 @@ export interface AmbientContext {
 	readonly file?: GitFile;
 	readonly launchpadGroup?: LaunchpadGroup;
 	readonly launchpadItem?: LaunchpadItem;
+	readonly pausedOperation?: GitPausedOperation;
 	readonly pullRequest?: PullRequest;
 	readonly reflog?: GitReflogRecord;
 	readonly remote?: GitRemote;
 	readonly repository?: Repository;
 	readonly root?: boolean;
 	readonly searchId?: string;
-	readonly status?: 'merging' | 'rebasing';
 	readonly storedComparisonId?: string;
 	readonly tag?: GitTag;
 	readonly workspace?: CloudWorkspace | LocalWorkspace;
@@ -198,8 +206,8 @@ export function getViewNodeId(type: string, context: AmbientContext): string {
 	if (context.pullRequest != null) {
 		uniqueness += `/pr/${context.pullRequest.id}`;
 	}
-	if (context.status != null) {
-		uniqueness += `/status/${context.status}`;
+	if (context.pausedOperation != null) {
+		uniqueness += `/paused-operation/${context.pausedOperation}`;
 	}
 	if (context.reflog != null) {
 		uniqueness += `/reflog/${context.reflog.sha}+${context.reflog.selector}+${context.reflog.command}+${

@@ -1,7 +1,7 @@
-export const proPreviewLengthInDays = 3;
-export const proTrialLengthInDays = 7;
-
-export type PromoKeys = 'devexdays' | 'launchpad-extended' | 'pro50';
+export const proFeaturePreviewUsages = 3;
+export const proFeaturePreviewUsageDurationInDays = 1;
+export const proPreviewLengthInDays = 0;
+export const proTrialLengthInDays = 14;
 
 export const enum SubscriptionPlanId {
 	Community = 'community',
@@ -31,3 +31,14 @@ export const enum SubscriptionState {
 	/** Indicates a Pro/Teams/Enterprise paid user */
 	Paid = 6,
 }
+
+export type SubscriptionStateString =
+	| 'verification'
+	| 'free'
+	| 'preview'
+	| 'preview-expired'
+	| 'trial'
+	| 'trial-expired'
+	| 'trial-reactivation-eligible'
+	| 'paid'
+	| 'unknown';

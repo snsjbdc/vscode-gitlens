@@ -1,11 +1,11 @@
 import type { Command } from 'vscode';
 import { TreeItem, TreeItemCollapsibleState } from 'vscode';
 import type { DiffWithPreviousCommandArgs } from '../../commands/diffWithPrevious';
-import { Commands } from '../../constants.commands';
+import { GlCommand } from '../../constants.commands';
 import { StatusFileFormatter } from '../../git/formatters/statusFormatter';
 import { GitUri } from '../../git/gitUri';
 import type { GitFile } from '../../git/models/file';
-import { getGitFileStatusIcon } from '../../git/models/file';
+import { getGitFileStatusIcon } from '../../git/utils/fileStatus.utils';
 import { dirname, joinPaths } from '../../system/path';
 import type { ViewsWithCommits } from '../viewBase';
 import { getFileTooltipMarkdown, ViewFileNode } from './abstract/viewFileNode';
@@ -110,7 +110,7 @@ export class UncommittedFileNode extends ViewFileNode<'uncommitted-file', ViewsW
 		};
 		return {
 			title: 'Open Changes with Previous Revision',
-			command: Commands.DiffWithPrevious,
+			command: GlCommand.DiffWithPrevious,
 			arguments: [undefined, commandArgs],
 		};
 	}

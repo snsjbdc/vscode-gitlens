@@ -16,13 +16,14 @@ import fs from 'fs';
 import HtmlPlugin from 'html-webpack-plugin';
 import ImageMinimizerPlugin from 'image-minimizer-webpack-plugin';
 import MiniCssExtractPlugin from 'mini-css-extract-plugin';
+import { createRequire } from 'module';
+import { availableParallelism } from 'os';
 import path from 'path';
 import { validate } from 'schema-utils';
 import TerserPlugin from 'terser-webpack-plugin';
+import { fileURLToPath } from 'url';
 import webpack from 'webpack';
 import WebpackRequireFromPlugin from 'webpack-require-from';
-import { fileURLToPath } from 'url';
-import { createRequire } from 'module';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,6 +31,19 @@ const __dirname = path.dirname(__filename);
 const { DefinePlugin, optimize, WebpackError } = webpack;
 
 const require = createRequire(import.meta.url);
+
+const cores = Math.max(Math.floor(availableParallelism() / 6) - 1, 1);
+const eslintWorker = {
+	max: cores,
+	filesPerWorker: 100,
+};
+
+const useNpm = Boolean(process.env.GL_USE_NPM);
+if (useNpm) {
+	console.log('Using npm to run scripts');
+}
+
+const pkgMgr = useNpm ? 'npm' : 'pnpm';
 
 /**
  * @param {{ analyzeBundle?: boolean; analyzeDeps?: boolean; esbuild?: boolean; skipLint?: boolean } | undefined } env
@@ -84,7 +98,7 @@ function getExtensionConfig(target, mode, env) {
 		plugins.push(
 			new ESLintLitePlugin({
 				files: path.join(__dirname, 'src', '**', '*.ts'),
-				worker: true,
+				worker: eslintWorker,
 				eslintOptions: {
 					cache: true,
 					cacheLocation: path.join(__dirname, '.eslintcache/', target === 'webworker' ? 'browser/' : ''),
@@ -104,19 +118,23 @@ function getExtensionConfig(target, mode, env) {
 		}
 
 		plugins.push(
+			new GenerateContributionsPlugin(),
+			new ExtractContributionsPlugin(),
+			new DocsPlugin(),
+			new LicensesPlugin(),
 			new FantasticonPlugin({
 				configPath: '.fantasticonrc.js',
 				onBefore:
 					mode !== 'production'
 						? undefined
 						: () =>
-								spawnSync('pnpm', ['run', 'icons:svgo'], {
+								spawnSync(pkgMgr, ['run', 'icons:svgo'], {
 									cwd: __dirname,
 									encoding: 'utf8',
 									shell: true,
 								}),
 				onComplete: () =>
-					spawnSync('pnpm', ['run', 'icons:apply'], {
+					spawnSync(pkgMgr, ['run', 'icons:apply'], {
 						cwd: __dirname,
 						encoding: 'utf8',
 						shell: true,
@@ -165,7 +183,7 @@ function getExtensionConfig(target, mode, env) {
 		},
 		mode: mode,
 		target: target,
-		devtool: mode === 'production' ? false : 'source-map',
+		devtool: mode === 'production' && !env.analyzeBundle ? false : 'source-map',
 		output: {
 			chunkFilename: '[name].js',
 			filename: 'gitlens.js',
@@ -322,7 +340,6 @@ function getWebviewsConfig(mode, env) {
 		getHtmlPlugin('rebase', false, mode, env),
 		getHtmlPlugin('settings', false, mode, env),
 		getHtmlPlugin('timeline', true, mode, env),
-		getHtmlPlugin('welcome', false, mode, env),
 		getHtmlPlugin('patchDetails', true, mode, env),
 		getCspHtmlPlugin(mode, env),
 		// new InlineChunkHtmlPlugin(HtmlPlugin, mode === 'production' ? ['\\.css$'] : []),
@@ -351,7 +368,7 @@ function getWebviewsConfig(mode, env) {
 		plugins.push(
 			new ESLintLitePlugin({
 				files: path.join(basePath, '**', '*.ts?(x)'),
-				worker: true,
+				worker: eslintWorker,
 				eslintOptions: {
 					cache: true,
 					cacheLocation: path.join(__dirname, '.eslintcache', 'webviews/'),
@@ -399,12 +416,11 @@ function getWebviewsConfig(mode, env) {
 			rebase: './rebase/rebase.ts',
 			settings: './settings/settings.ts',
 			timeline: './plus/timeline/timeline.ts',
-			welcome: './welcome/welcome.ts',
 			patchDetails: './plus/patchDetails/patchDetails.ts',
 		},
 		mode: mode,
 		target: 'web',
-		devtool: mode === 'production' ? false : 'source-map',
+		devtool: mode === 'production' && !env.analyzeBundle ? false : 'source-map',
 		output: {
 			chunkFilename: '[name].js',
 			filename: '[name].js',
@@ -725,6 +741,155 @@ const schema = {
 	},
 };
 
+class FileGeneratorPlugin {
+	/**
+	 * @param {{pluginName: string; pathsToWatch: string[]; command: { name: string; command: string; args: string[] }; strings?: { starting: string; completed: string } }} config
+	 */
+	constructor(config) {
+		this.pluginName = config.pluginName;
+		this.pathsToWatch = config.pathsToWatch;
+		this.command = config.command;
+		this.strings = config.strings ?? { starting: 'Generating', completed: 'Generated' };
+		this.lastModified = 0;
+	}
+
+	/**
+	 * @private
+	 * @param {string[]} paths
+	 */
+	pathsChanged(paths) {
+		let changed = false;
+		for (const path of paths) {
+			try {
+				const stats = fs.statSync(path);
+				if (stats.mtimeMs > this.lastModified) {
+					changed = true;
+					break;
+				}
+			} catch {}
+		}
+
+		return changed;
+	}
+
+	apply(compiler) {
+		let pendingGeneration = false;
+
+		// Add dependent paths for watching
+		compiler.hooks.thisCompilation.tap(this.pluginName, compilation => {
+			this.pathsToWatch.map(path => compilation.fileDependencies.add(path));
+		});
+
+		// Run generation when needed
+		compiler.hooks.make.tapAsync(this.pluginName, async (compilation, callback) => {
+			const logger = compiler.getInfrastructureLogger(this.pluginName);
+			try {
+				const changed = this.pathsChanged(this.pathsToWatch);
+				// Only regenerate if the file has changed since last time
+				if (!changed) {
+					callback();
+					return;
+				}
+
+				// Avoid duplicate runs
+				if (pendingGeneration) {
+					callback();
+					return;
+				}
+
+				pendingGeneration = true;
+
+				try {
+					logger.log(`${this.strings.starting} ${this.command.name}...`);
+					const start = Date.now();
+
+					const result = spawnSync(this.command.command, this.command.args, {
+						cwd: __dirname,
+						encoding: 'utf8',
+						shell: true,
+					});
+
+					if (result.status === 0) {
+						this.lastModified = Date.now();
+						logger.log(
+							`${this.strings.completed} ${this.command.name} in \x1b[32m${Date.now() - start}ms\x1b[0m`,
+						);
+					} else {
+						logger.error(`[${this.pluginName}] Failed to run ${this.command.name}: ${result.stderr}`);
+					}
+				} finally {
+					pendingGeneration = false;
+				}
+			} catch (ex) {
+				// File doesn't exist or other error
+				logger.error(`[${this.pluginName}] Error checking source file: ${ex}`);
+			}
+
+			callback();
+		});
+	}
+}
+
+class GenerateContributionsPlugin extends FileGeneratorPlugin {
+	constructor() {
+		super({
+			pluginName: 'contributions',
+			pathsToWatch: [path.join(__dirname, 'contributions.json')],
+			command: {
+				name: "'package.json' contributions",
+				command: pkgMgr,
+				args: ['run', 'generate:contributions'],
+			},
+		});
+	}
+}
+
+class ExtractContributionsPlugin extends FileGeneratorPlugin {
+	constructor() {
+		super({
+			pluginName: 'contributions',
+			pathsToWatch: [path.join(__dirname, 'package.json')],
+			command: {
+				name: "contributions from 'package.json'",
+				command: pkgMgr,
+				args: ['run', 'extract:contributions'],
+			},
+			strings: {
+				starting: 'Extracting',
+				completed: 'Extracted',
+			},
+		});
+	}
+}
+
+class DocsPlugin extends FileGeneratorPlugin {
+	constructor() {
+		super({
+			pluginName: 'docs',
+			pathsToWatch: [path.join(__dirname, 'src', 'constants.telemetry.ts')],
+			command: {
+				name: 'docs',
+				command: pkgMgr,
+				args: ['run', 'generate:docs:telemetry'],
+			},
+		});
+	}
+}
+
+class LicensesPlugin extends FileGeneratorPlugin {
+	constructor() {
+		super({
+			pluginName: 'licenses',
+			pathsToWatch: [path.join(__dirname, 'package.json')],
+			command: {
+				name: 'licenses',
+				command: pkgMgr,
+				args: ['run', 'generate:licenses'],
+			},
+		});
+	}
+}
+
 class FantasticonPlugin {
 	alreadyRun = false;
 
@@ -784,7 +949,7 @@ class FantasticonPlugin {
 			}
 
 			const logger = compiler.getInfrastructureLogger(this.pluginName);
-			logger.log(`Generating '${compiler.name}' icon font...`);
+			logger.log(`Generating icon font...`);
 
 			const start = Date.now();
 
@@ -813,7 +978,7 @@ class FantasticonPlugin {
 				})`;
 			}
 
-			logger.log(`Generated '${compiler.name}' icon font in \x1b[32m${Date.now() - start}ms\x1b[0m${suffix}`);
+			logger.log(`Generated icon font in \x1b[32m${Date.now() - start}ms\x1b[0m${suffix}`);
 		}
 
 		const generateFn = generate.bind(this);

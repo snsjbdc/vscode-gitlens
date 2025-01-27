@@ -12,7 +12,9 @@ import type {
 	DraftPatchFileChange,
 	DraftRole,
 	DraftVisibility,
-} from '../../../../../gk/models/drafts';
+} from '../../../../../plus/drafts/models/drafts';
+import { makeHierarchical } from '../../../../../system/array';
+import { flatCount } from '../../../../../system/iterable';
 import type {
 	CloudDraftDetails,
 	DraftDetails,
@@ -20,9 +22,7 @@ import type {
 	ExecuteFileActionParams,
 	PatchDetails,
 	State,
-} from '../../../../../plus/webviews/patchDetails/protocol';
-import { makeHierarchical } from '../../../../../system/array';
-import { flatCount } from '../../../../../system/iterable';
+} from '../../../../plus/patchDetails/protocol';
 import type {
 	TreeItemActionDetail,
 	TreeItemBase,
@@ -38,6 +38,7 @@ import '../../../shared/components/button-container';
 import '../../../shared/components/button';
 import '../../../shared/components/code-icon';
 import '../../../shared/components/commit/commit-identity';
+import '../../../shared/components/markdown/markdown';
 import '../../../shared/components/tree/tree-generator';
 import '../../../shared/components/webview-pane';
 
@@ -47,7 +48,7 @@ const BesideViewColumn = -2; /*ViewColumn.Beside*/
 interface ExplainState {
 	cancelled?: boolean;
 	error?: { message: string };
-	summary?: string;
+	result?: { summary: string; body: string };
 }
 
 export interface ApplyPatchDetail {
@@ -193,6 +194,9 @@ export class GlDraftDetails extends GlTreeBase {
 	private renderExplainAi() {
 		if (this.state?.orgSettings.ai === false) return undefined;
 
+		const markdown =
+			this.explain?.result != null ? `${this.explain.result.summary}\n\n${this.explain.result.body}` : undefined;
+
 		// TODO: add loading and response states
 		return html`
 			<webview-pane collapsable data-region="explain-pane">
@@ -218,46 +222,39 @@ export class GlDraftDetails extends GlTreeBase {
 							>
 						</span>
 					</p>
-					${when(
-						this.explain,
-						() => html`
-							<div
-								class="ai-content${this.explain?.error ? ' has-error' : ''}"
-								data-region="ai-explanation"
-							>
-								${when(
-									this.explain?.error,
-									() =>
-										html`<p class="ai-content__summary scrollable">
-											${this.explain!.error!.message ?? 'Error retrieving content'}
-										</p>`,
-								)}
-								${when(
-									this.explain?.summary,
-									() => html`<p class="ai-content__summary scrollable">${this.explain!.summary}</p>`,
-								)}
-							</div>
-						`,
-					)}
+					${markdown
+						? html`<div class="ai-content" data-region="commit-explanation">
+								<gl-markdown
+									class="ai-content__summary scrollable"
+									markdown="${markdown}"
+								></gl-markdown>
+						  </div>`
+						: this.explain?.error
+						  ? html`<div class="ai-content has-error" data-region="commit-explanation">
+									<p class="ai-content__summary scrollable">
+										${this.explain.error.message ?? 'Error retrieving content'}
+									</p>
+						    </div>`
+						  : undefined}
 				</div>
 			</webview-pane>
 		`;
 	}
 
 	// private renderCommitStats() {
-	// 	if (this.state?.draft?.stats?.changedFiles == null) {
+	// 	if (this.state?.draft?.stats?.files == null) {
 	// 		return undefined;
 	// 	}
 
-	// 	if (typeof this.state.draft.stats.changedFiles === 'number') {
+	// 	if (typeof this.state.draft.stats.files === 'number') {
 	// 		return html`<commit-stats
 	// 			.added=${undefined}
-	// 			modified="${this.state.draft.stats.changedFiles}"
+	// 			modified="${this.state.draft.stats.files}"
 	// 			.removed=${undefined}
 	// 		></commit-stats>`;
 	// 	}
 
-	// 	const { added, deleted, changed } = this.state.draft.stats.changedFiles;
+	// 	const { added, deleted, changed } = this.state.draft.stats.files;
 	// 	return html`<commit-stats added="${added}" modified="${changed}" removed="${deleted}"></commit-stats>`;
 	// }
 

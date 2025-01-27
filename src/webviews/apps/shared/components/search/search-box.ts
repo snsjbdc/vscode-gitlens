@@ -1,8 +1,8 @@
-import { isMac } from '@env/platform';
 import type { TemplateResult } from 'lit';
 import { css, html } from 'lit';
 import { customElement, property, query } from 'lit/decorators.js';
 import type { Disposable } from 'vscode';
+import { isMac } from '@env/platform';
 import type { SearchQuery } from '../../../../../constants.search';
 import { pluralize } from '../../../../../system/string';
 import { DOM } from '../../dom';
@@ -112,12 +112,6 @@ export class GlSearchBox extends GlElement {
 
 	@property({ type: String })
 	errorMessage = '';
-
-	@property({ type: String })
-	label = 'Search';
-
-	@property({ type: String })
-	placeholder = 'Search commits (↑↓ for history), e.g. "Updates dependencies" author:eamodio';
 
 	@property({ type: String })
 	value = '';
@@ -270,8 +264,6 @@ export class GlSearchBox extends GlElement {
 				exportparts="search: search"
 				.errorMessage="${this.errorMessage}"
 				.filter=${this.filter}
-				.label="${this.label}"
-				.placeholder="${this.placeholder}"
 				.matchAll="${this.matchAll}"
 				.matchCase="${this.matchCase}"
 				.matchRegex="${this.matchRegex}"

@@ -1,19 +1,19 @@
 import type { TextDocumentShowOptions, Uri } from 'vscode';
 import { Range, ViewColumn } from 'vscode';
 import { GlyphChars } from '../constants';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import type { GitCommit } from '../git/models/commit';
 import { isCommit } from '../git/models/commit';
-import { deletedOrMissing } from '../git/models/constants';
-import { isShaLike, isUncommitted, shortenRevision } from '../git/models/reference';
+import { deletedOrMissing } from '../git/models/revision';
+import { isShaLike, isUncommitted, shortenRevision } from '../git/utils/revision.utils';
 import { showGenericErrorMessage } from '../messages';
+import { command } from '../system/-webview/command';
+import { openDiffEditor } from '../system/-webview/vscode';
 import { createMarkdownCommandLink } from '../system/commands';
 import { Logger } from '../system/logger';
 import { basename } from '../system/path';
-import { command } from '../system/vscode/command';
-import { openDiffEditor } from '../system/vscode/utils';
-import { Command } from './base';
+import { GlCommandBase } from './commandBase';
 
 export interface DiffWithCommandArgsRevision {
 	sha: string;
@@ -31,7 +31,7 @@ export interface DiffWithCommandArgs {
 }
 
 @command()
-export class DiffWithCommand extends Command {
+export class DiffWithCommand extends GlCommandBase {
 	static createMarkdownCommandLink(args: DiffWithCommandArgs): string;
 	static createMarkdownCommandLink(commit: GitCommit, line?: number): string;
 	static createMarkdownCommandLink(argsOrCommit: DiffWithCommandArgs | GitCommit, line?: number): string {
@@ -75,11 +75,11 @@ export class DiffWithCommand extends Command {
 			args = argsOrCommit;
 		}
 
-		return createMarkdownCommandLink<DiffWithCommandArgs>(Commands.DiffWith, args);
+		return createMarkdownCommandLink<DiffWithCommandArgs>(GlCommand.DiffWith, args);
 	}
 
 	constructor(private readonly container: Container) {
-		super(Commands.DiffWith);
+		super(GlCommand.DiffWith);
 	}
 
 	async execute(args?: DiffWithCommandArgs): Promise<any> {
@@ -115,11 +115,9 @@ export class DiffWithCommand extends Command {
 
 			if (args.rhs.sha && args.rhs.sha !== deletedOrMissing) {
 				// Ensure that the file still exists in this commit
-				const status = await this.container.git.getFileStatusForCommit(
-					args.repoPath,
-					args.rhs.uri,
-					args.rhs.sha,
-				);
+				const status = await this.container.git
+					.commits(args.repoPath)
+					.getCommitFileStatus(args.rhs.uri, args.rhs.sha);
 				if (status?.status === 'D') {
 					args.rhs.sha = deletedOrMissing;
 				} else {

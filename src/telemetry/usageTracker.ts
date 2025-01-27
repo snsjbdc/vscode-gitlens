@@ -2,8 +2,8 @@ import type { Disposable, Event } from 'vscode';
 import { EventEmitter } from 'vscode';
 import type { TrackedUsage, TrackedUsageKeys } from '../constants.telemetry';
 import type { Container } from '../container';
+import type { Storage } from '../system/-webview/storage';
 import { updateRecordValue } from '../system/object';
-import type { Storage } from '../system/vscode/storage';
 
 export type UsageChangeEvent = {
 	/**
@@ -28,6 +28,10 @@ export class UsageTracker implements Disposable {
 
 	get(key: TrackedUsageKeys): TrackedUsage | undefined {
 		return this.storage.get('usages')?.[key];
+	}
+
+	isUsed(key: TrackedUsageKeys): boolean {
+		return Boolean(this.get(key)?.firstUsedAt);
 	}
 
 	async reset(key?: TrackedUsageKeys): Promise<void> {

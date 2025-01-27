@@ -1,9 +1,10 @@
 import type { Uri } from 'vscode';
-import { Commands } from '../../constants.commands';
+import type { Commands } from '../../constants.commands';
+import { GlCommand } from '../../constants.commands';
 import type { GitReference } from '../../git/models/reference';
 import type { GitRemote } from '../../git/models/remote';
 import type { Repository } from '../../git/models/repository';
-import type { OpenWorkspaceLocation } from '../../system/vscode/utils';
+import type { OpenWorkspaceLocation } from '../../system/-webview/vscode';
 
 export type UriTypes = 'link';
 
@@ -22,6 +23,7 @@ export enum DeepLinkType {
 export enum DeepLinkCommandType {
 	CloudPatches = 'cloud-patches',
 	Graph = 'graph',
+	Home = 'home',
 	Inspect = 'inspect',
 	Launchpad = 'launchpad',
 	Walkthrough = 'walkthrough',
@@ -33,12 +35,13 @@ export function isDeepLinkCommandType(type: string): type is DeepLinkCommandType
 }
 
 export const DeepLinkCommandTypeToCommand = new Map<DeepLinkCommandType, Commands>([
-	[DeepLinkCommandType.CloudPatches, Commands.ShowDraftsView],
-	[DeepLinkCommandType.Graph, Commands.ShowGraph],
-	[DeepLinkCommandType.Inspect, Commands.ShowCommitDetailsView],
-	[DeepLinkCommandType.Launchpad, Commands.ShowLaunchpad],
-	[DeepLinkCommandType.Walkthrough, Commands.GetStarted],
-	[DeepLinkCommandType.Worktrees, Commands.ShowWorktreesView],
+	[DeepLinkCommandType.CloudPatches, GlCommand.ShowDraftsView],
+	[DeepLinkCommandType.Graph, GlCommand.ShowGraph],
+	[DeepLinkCommandType.Home, GlCommand.ShowHomeView],
+	[DeepLinkCommandType.Inspect, GlCommand.ShowCommitDetailsView],
+	[DeepLinkCommandType.Launchpad, GlCommand.ShowLaunchpad],
+	[DeepLinkCommandType.Walkthrough, GlCommand.GetStarted],
+	[DeepLinkCommandType.Worktrees, GlCommand.ShowWorktreesView],
 ]);
 
 export enum DeepLinkActionType {
@@ -100,6 +103,7 @@ export interface DeepLink {
 	secondaryTargetId?: string;
 	secondaryRemoteUrl?: string;
 	action?: string;
+	prId?: string;
 	params?: URLSearchParams;
 }
 
@@ -178,6 +182,7 @@ export function parseDeepLinkUri(uri: Uri): DeepLink | undefined {
 				secondaryRemoteUrl: secondaryRemoteUrl,
 				action: action,
 				params: urlParams,
+				prId: urlParams.get('prId') ?? undefined,
 			};
 		}
 		case DeepLinkType.Draft: {
@@ -239,6 +244,7 @@ export const enum DeepLinkServiceState {
 	OpenInspect,
 	SwitchToRef,
 	RunCommand,
+	OpenAllPrChanges,
 }
 
 export const enum DeepLinkServiceAction {
@@ -271,6 +277,7 @@ export const enum DeepLinkServiceAction {
 	OpenFile,
 	OpenInspect,
 	OpenSwitch,
+	OpenAllPrChanges,
 }
 
 export type DeepLinkRepoOpenType = 'clone' | 'folder' | 'workspace' | 'current';
@@ -417,6 +424,12 @@ export const deepLinkStateTransitionTable: Record<string, Record<string, DeepLin
 		[DeepLinkServiceAction.DeepLinkCancelled]: DeepLinkServiceState.Idle,
 	},
 	[DeepLinkServiceState.OpenInspect]: {
+		[DeepLinkServiceAction.OpenAllPrChanges]: DeepLinkServiceState.OpenAllPrChanges,
+		[DeepLinkServiceAction.DeepLinkResolved]: DeepLinkServiceState.Idle,
+		[DeepLinkServiceAction.DeepLinkErrored]: DeepLinkServiceState.Idle,
+		[DeepLinkServiceAction.DeepLinkCancelled]: DeepLinkServiceState.Idle,
+	},
+	[DeepLinkServiceState.OpenAllPrChanges]: {
 		[DeepLinkServiceAction.DeepLinkResolved]: DeepLinkServiceState.Idle,
 		[DeepLinkServiceAction.DeepLinkErrored]: DeepLinkServiceState.Idle,
 		[DeepLinkServiceAction.DeepLinkCancelled]: DeepLinkServiceState.Idle,

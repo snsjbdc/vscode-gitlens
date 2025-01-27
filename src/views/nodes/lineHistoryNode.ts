@@ -1,16 +1,16 @@
 import { Disposable, Selection, TreeItem, TreeItemCollapsibleState, window } from 'vscode';
 import type { GitUri } from '../../git/gitUri';
 import type { GitBranch } from '../../git/models/branch';
-import { deletedOrMissing } from '../../git/models/constants';
 import type { GitFile } from '../../git/models/file';
-import { GitFileIndexStatus } from '../../git/models/file';
+import { GitFileIndexStatus } from '../../git/models/fileStatus';
 import type { GitLog } from '../../git/models/log';
-import { isUncommitted } from '../../git/models/reference';
 import type { RepositoryChangeEvent, RepositoryFileSystemChangeEvent } from '../../git/models/repository';
 import { RepositoryChange, RepositoryChangeComparisonMode } from '../../git/models/repository';
-import { gate } from '../../system/decorators/gate';
+import { deletedOrMissing } from '../../git/models/revision';
+import { isUncommitted } from '../../git/utils/revision.utils';
+import { gate } from '../../system/decorators/-webview/gate';
+import { memoize } from '../../system/decorators/-webview/memoize';
 import { debug } from '../../system/decorators/log';
-import { memoize } from '../../system/decorators/memoize';
 import { weakEvent } from '../../system/event';
 import { filterMap } from '../../system/iterable';
 import { Logger } from '../../system/logger';
@@ -80,13 +80,8 @@ export class LineHistoryNode
 					? await this.view.container.git.getBlameForRangeContents(this.uri, selection, this.editorContents)
 					: await this.view.container.git.getBlameForRange(this.uri, selection)
 				: undefined,
-			this.view.container.git.getBranchesAndTagsTipsFn(this.uri.repoPath, this.branch?.name),
-			range
-				? this.view.container.git.getLogRefsOnly(this.uri.repoPath, {
-						limit: 0,
-						ref: range,
-				  })
-				: undefined,
+			this.view.container.git.getBranchesAndTagsTipsLookup(this.uri.repoPath, this.branch?.name),
+			range ? this.view.container.git.commits(this.uri.repoPath).getLogShasOnly(range, { limit: 0 }) : undefined,
 		]);
 
 		// Check for any uncommitted changes in the range
@@ -106,7 +101,7 @@ export class LineHistoryNode
 					selection.active.character,
 				);
 
-				const status = await this.view.container.git.getStatusForFile(this.uri.repoPath, this.uri);
+				const status = await this.view.container.git.status(this.uri.repoPath).getStatusForFile?.(this.uri);
 
 				if (status != null) {
 					const file: GitFile = {
@@ -217,7 +212,7 @@ export class LineHistoryNode
 				RepositoryChange.Heads,
 				RepositoryChange.Remotes,
 				RepositoryChange.RemoteProviders,
-				RepositoryChange.Status,
+				RepositoryChange.PausedOperationStatus,
 				RepositoryChange.Unknown,
 				RepositoryChangeComparisonMode.Any,
 			)
@@ -249,13 +244,14 @@ export class LineHistoryNode
 	private _log: GitLog | undefined;
 	private async getLog(selection?: Selection) {
 		if (this._log == null) {
-			this._log = await this.view.container.git.getLogForFile(this.uri.repoPath, this.uri, {
-				all: false,
-				limit: this.limit ?? this.view.config.pageItemLimit,
-				range: selection ?? this.selection,
-				ref: this.uri.sha,
-				renames: false,
-			});
+			this._log = await this.view.container.git
+				.commits(this.uri.repoPath!)
+				.getLogForFile(this.uri, this.uri.sha, {
+					all: false,
+					limit: this.limit ?? this.view.config.pageItemLimit,
+					range: selection ?? this.selection,
+					renames: false,
+				});
 		}
 
 		return this._log;

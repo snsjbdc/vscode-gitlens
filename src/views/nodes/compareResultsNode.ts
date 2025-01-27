@@ -1,14 +1,14 @@
-import { md5 } from '@env/crypto';
 import type { TreeCheckboxChangeEvent } from 'vscode';
 import { Disposable, ThemeIcon, TreeItem, TreeItemCheckboxState, TreeItemCollapsibleState, window } from 'vscode';
+import { md5 } from '@env/crypto';
 import type { StoredNamedRef } from '../../constants.storage';
 import type { FilesComparison } from '../../git/actions/commit';
 import { GitUri } from '../../git/gitUri';
-import { createRevisionRange, shortenRevision } from '../../git/models/reference';
 import type { GitUser } from '../../git/models/user';
 import type { CommitsQueryResults, FilesQueryResults } from '../../git/queryResults';
 import { getAheadBehindFilesQuery, getCommitsQuery, getFilesQuery } from '../../git/queryResults';
-import { gate } from '../../system/decorators/gate';
+import { createRevisionRange, shortenRevision } from '../../git/utils/revision.utils';
+import { gate } from '../../system/decorators/-webview/gate';
 import { debug, log } from '../../system/decorators/log';
 import { weakEvent } from '../../system/event';
 import { pluralize } from '../../system/string';
@@ -54,7 +54,7 @@ export class CompareResultsNode extends SubscribeableViewNode<
 		// If this is a new comparison, save it
 		if (this._storedAt === 0) {
 			this._storedAt = Date.now();
-			void this.store(true);
+			void this.store(true).catch();
 		}
 	}
 
@@ -123,7 +123,7 @@ export class CompareResultsNode extends SubscribeableViewNode<
 	private onNodesCheckedStateChanged(e: TreeCheckboxChangeEvent<ViewNode>) {
 		const prefix = getComparisonStoragePrefix(this.getStorageId());
 		if (e.items.some(([n]) => n.id?.startsWith(prefix))) {
-			void this.store(true);
+			void this.store(true).catch();
 		}
 	}
 
@@ -133,19 +133,23 @@ export class CompareResultsNode extends SubscribeableViewNode<
 
 	async getChildren(): Promise<ViewNode[]> {
 		if (this.children == null) {
-			const ahead = this.ahead;
-			const behind = this.behind;
+			const ahead = {
+				...this.ahead,
+				range: createRevisionRange(this.ahead.ref1, this.ahead.ref2, '..'),
+			};
+			const behind = { ...this.behind, range: createRevisionRange(this.behind.ref1, this.behind.ref2, '..') };
 
-			const counts = await this.view.container.git.getLeftRightCommitCount(
-				this.repoPath,
-				createRevisionRange(behind.ref1 || 'HEAD', behind.ref2, '...'),
-				{ authors: this.filterByAuthors },
-			);
+			const counts = await this.view.container.git
+				.commits(this.repoPath)
+				.getLeftRightCommitCount(createRevisionRange(behind.ref1 || 'HEAD', behind.ref2, '...'), {
+					authors: this.filterByAuthors,
+				});
 
+			const branchesProvider = this.view.container.git.branches(this.repoPath);
 			const mergeBase =
-				(await this.view.container.git.getMergeBase(this.repoPath, behind.ref1, behind.ref2, {
+				(await branchesProvider.getMergeBase(behind.ref1, behind.ref2, {
 					forkPoint: true,
-				})) ?? (await this.view.container.git.getMergeBase(this.repoPath, behind.ref1, behind.ref2));
+				})) ?? (await branchesProvider.getMergeBase(behind.ref1, behind.ref2));
 
 			const children: ViewNode[] = [
 				new ResultsCommitsNode(
@@ -154,7 +158,7 @@ export class CompareResultsNode extends SubscribeableViewNode<
 					this.repoPath,
 					'Behind',
 					{
-						query: this.getCommitsQuery(createRevisionRange(behind.ref1, behind.ref2, '..')),
+						query: this.getCommitsQuery(behind.range),
 						comparison: behind,
 						direction: 'behind',
 						files: {
@@ -174,7 +178,7 @@ export class CompareResultsNode extends SubscribeableViewNode<
 					this.repoPath,
 					'Ahead',
 					{
-						query: this.getCommitsQuery(createRevisionRange(ahead.ref1, ahead.ref2, '..')),
+						query: this.getCommitsQuery(ahead.range),
 						comparison: ahead,
 						direction: 'ahead',
 						files: {
@@ -252,7 +256,7 @@ export class CompareResultsNode extends SubscribeableViewNode<
 	@log()
 	clearReviewed() {
 		resetComparisonCheckedFiles(this.view, this.getStorageId());
-		void this.store();
+		void this.store().catch();
 	}
 
 	@log()

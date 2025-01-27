@@ -1,7 +1,7 @@
 import type { TextDocumentShowOptions, TextEditor, Uri } from 'vscode';
 import type { FileAnnotationType } from '../config';
 import { GlyphChars, quickPickTitleMaxChars } from '../constants';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { openFileAtRevision } from '../git/actions/commit';
 import { GitUri } from '../git/gitUri';
@@ -9,9 +9,10 @@ import type { GitReference } from '../git/models/reference';
 import { showNoRepositoryWarningMessage } from '../messages';
 import { showStashPicker } from '../quickpicks/commitPicker';
 import { showReferencePicker } from '../quickpicks/referencePicker';
+import { command } from '../system/-webview/command';
 import { pad } from '../system/string';
-import { command } from '../system/vscode/command';
-import { ActiveEditorCommand, getCommandUri } from './base';
+import { ActiveEditorCommand } from './commandBase';
+import { getCommandUri } from './commandBase.utils';
 
 export interface OpenFileAtRevisionFromCommandArgs {
 	reference?: GitReference;
@@ -25,7 +26,7 @@ export interface OpenFileAtRevisionFromCommandArgs {
 @command()
 export class OpenFileAtRevisionFromCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super(Commands.OpenFileAtRevisionFrom);
+		super(GlCommand.OpenFileAtRevisionFrom);
 	}
 
 	async execute(editor: TextEditor | undefined, uri?: Uri, args?: OpenFileAtRevisionFromCommandArgs) {
@@ -49,7 +50,7 @@ export class OpenFileAtRevisionFromCommand extends ActiveEditorCommand {
 
 				const title = `Open Changes with Stash${pad(GlyphChars.Dot, 2, 2)}`;
 				const pick = await showStashPicker(
-					this.container.git.getStash(gitUri.repoPath),
+					this.container.git.stash(gitUri.repoPath)?.getStash(),
 					`${title}${gitUri.getFormattedFileName({ truncateTo: quickPickTitleMaxChars - title.length })}`,
 					'Choose a stash to compare with',
 					// Stashes should always come with files, so this should be fine (but protect it just in case)

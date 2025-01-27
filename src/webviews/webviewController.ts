@@ -1,19 +1,19 @@
-import { getNonce } from '@env/crypto';
 import type { ViewBadge, Webview, WebviewPanel, WebviewView, WindowState } from 'vscode';
-import { Disposable, EventEmitter, Uri, ViewColumn, window, workspace } from 'vscode';
+import { CancellationTokenSource, Disposable, EventEmitter, Uri, ViewColumn, window, workspace } from 'vscode';
+import { getNonce } from '@env/crypto';
 import type { Commands } from '../constants.commands';
 import type { WebviewTelemetryContext } from '../constants.telemetry';
-import type { CustomEditorTypes, WebviewTypes, WebviewViewTypes } from '../constants.views';
+import type { CustomEditorTypes, WebviewIds, WebviewTypes, WebviewViewIds, WebviewViewTypes } from '../constants.views';
 import type { Container } from '../container';
+import { executeCommand, executeCoreCommand } from '../system/-webview/command';
+import { setContext } from '../system/-webview/context';
 import { getScopedCounter } from '../system/counter';
 import { debug, logName } from '../system/decorators/log';
-import { serialize } from '../system/decorators/serialize';
+import { sequentialize } from '../system/decorators/serialize';
 import { getLoggableName, Logger } from '../system/logger';
 import { getLogScope, getNewLogScope, setLogScopeExit } from '../system/logger.scope';
 import { pauseOnCancelOrTimeout } from '../system/promise';
 import { maybeStopWatch, Stopwatch } from '../system/stopwatch';
-import { executeCommand, executeCoreCommand } from '../system/vscode/command';
-import { setContext } from '../system/vscode/context';
 import type { WebviewContext } from '../system/webview';
 import type {
 	IpcCallMessageType,
@@ -21,6 +21,7 @@ import type {
 	IpcCallResponseParamsType,
 	IpcMessage,
 	IpcNotification,
+	IpcPromise,
 	IpcRequest,
 	WebviewFocusChangedParams,
 	WebviewState,
@@ -29,6 +30,7 @@ import {
 	DidChangeHostWindowFocusNotification,
 	DidChangeWebviewFocusNotification,
 	ExecuteCommand,
+	ipcPromiseSettled,
 	TelemetrySendEventCommand,
 	WebviewFocusChangedCommand,
 	WebviewReadyCommand,
@@ -41,68 +43,91 @@ const ipcSequencer = getScopedCounter();
 const utf8TextDecoder = new TextDecoder('utf8');
 const utf8TextEncoder = new TextEncoder();
 
-type GetParentType<T extends WebviewPanelDescriptor | WebviewViewDescriptor> = T extends WebviewPanelDescriptor
+type GetWebviewDescriptor<T extends WebviewIds | WebviewViewIds> = T extends WebviewIds
+	? WebviewPanelDescriptor<T>
+	: T extends WebviewViewIds
+	  ? WebviewViewDescriptor<T>
+	  : never;
+
+type GetWebviewParent<T extends WebviewIds | WebviewViewIds> = T extends WebviewIds
 	? WebviewPanel
-	: T extends WebviewViewDescriptor
+	: T extends WebviewViewIds
 	  ? WebviewView
 	  : never;
 
 type WebviewPanelController<
+	ID extends WebviewIds,
 	State,
 	SerializedState = State,
 	ShowingArgs extends unknown[] = unknown[],
-> = WebviewController<State, SerializedState, ShowingArgs, WebviewPanelDescriptor>;
+> = WebviewController<ID, State, SerializedState, ShowingArgs>;
 type WebviewViewController<
+	ID extends WebviewViewIds,
 	State,
 	SerializedState = State,
 	ShowingArgs extends unknown[] = unknown[],
-> = WebviewController<State, SerializedState, ShowingArgs, WebviewViewDescriptor>;
+> = WebviewController<ID, State, SerializedState, ShowingArgs>;
 
-@logName<WebviewController<any>>(c => `WebviewController(${c.id}${c.instanceId != null ? `|${c.instanceId}` : ''})`)
+@logName<WebviewController<WebviewIds | WebviewViewIds, any>>(
+	c => `WebviewController(${c.id}${c.instanceId != null ? `|${c.instanceId}` : ''})`,
+)
 export class WebviewController<
+		ID extends WebviewIds | WebviewViewIds,
 		State,
 		SerializedState = State,
 		ShowingArgs extends unknown[] = unknown[],
-		Descriptor extends WebviewPanelDescriptor | WebviewViewDescriptor =
-			| WebviewPanelDescriptor
-			| WebviewViewDescriptor,
 	>
-	implements WebviewHost<Descriptor>, Disposable
+	implements WebviewHost<ID>, Disposable
 {
-	static async create<State, SerializedState = State, ShowingArgs extends unknown[] = unknown[]>(
+	static async create<
+		ID extends WebviewIds,
+		State,
+		SerializedState = State,
+		ShowingArgs extends unknown[] = unknown[],
+	>(
 		container: Container,
 		commandRegistrar: WebviewCommandRegistrar,
-		descriptor: WebviewPanelDescriptor,
+		descriptor: WebviewPanelDescriptor<ID>,
 		instanceId: string | undefined,
 		parent: WebviewPanel,
 		resolveProvider: (
 			container: Container,
-			host: WebviewHost,
+			host: WebviewHost<ID>,
 		) => Promise<WebviewProvider<State, SerializedState, ShowingArgs>>,
-	): Promise<WebviewController<State, SerializedState, ShowingArgs, WebviewPanelDescriptor>>;
-	static async create<State, SerializedState = State, ShowingArgs extends unknown[] = unknown[]>(
+	): Promise<WebviewController<ID, State, SerializedState, ShowingArgs>>;
+	static async create<
+		ID extends WebviewViewIds,
+		State,
+		SerializedState = State,
+		ShowingArgs extends unknown[] = unknown[],
+	>(
 		container: Container,
 		commandRegistrar: WebviewCommandRegistrar,
-		descriptor: WebviewViewDescriptor,
+		descriptor: WebviewViewDescriptor<ID>,
 		instanceId: string | undefined,
 		parent: WebviewView,
 		resolveProvider: (
 			container: Container,
-			host: WebviewHost,
+			host: WebviewHost<ID>,
 		) => Promise<WebviewProvider<State, SerializedState, ShowingArgs>>,
-	): Promise<WebviewController<State, SerializedState, ShowingArgs, WebviewViewDescriptor>>;
-	static async create<State, SerializedState = State, ShowingArgs extends unknown[] = unknown[]>(
+	): Promise<WebviewController<ID, State, SerializedState, ShowingArgs>>;
+	static async create<
+		ID extends WebviewIds | WebviewViewIds,
+		State,
+		SerializedState = State,
+		ShowingArgs extends unknown[] = unknown[],
+	>(
 		container: Container,
 		commandRegistrar: WebviewCommandRegistrar,
-		descriptor: WebviewPanelDescriptor | WebviewViewDescriptor,
+		descriptor: GetWebviewDescriptor<ID>,
 		instanceId: string | undefined,
-		parent: WebviewPanel | WebviewView,
+		parent: GetWebviewParent<ID>,
 		resolveProvider: (
 			container: Container,
-			host: WebviewHost,
+			host: WebviewHost<ID>,
 		) => Promise<WebviewProvider<State, SerializedState, ShowingArgs>>,
-	): Promise<WebviewController<State, SerializedState, ShowingArgs>> {
-		const controller = new WebviewController<State, SerializedState, ShowingArgs>(
+	): Promise<WebviewController<ID, State, SerializedState, ShowingArgs>> {
+		const controller = new WebviewController<ID, State, SerializedState, ShowingArgs>(
 			container,
 			commandRegistrar,
 			descriptor,
@@ -119,30 +144,34 @@ export class WebviewController<
 		return this._onDidDispose.event;
 	}
 
-	readonly id: Descriptor['id'];
+	readonly id: ID;
 
 	private _ready: boolean = false;
 	get ready() {
 		return this._ready;
 	}
 
+	/** Used to cancel pending ipc promise operations */
+	private cancellation: CancellationTokenSource | undefined;
 	private disposable: Disposable | undefined;
 	private _isInEditor: boolean;
 	private /*readonly*/ provider!: WebviewProvider<State, SerializedState, ShowingArgs>;
 	private readonly webview: Webview;
 
+	private viewColumn: ViewColumn | undefined;
+
 	private constructor(
 		private readonly container: Container,
 		private readonly _commandRegistrar: WebviewCommandRegistrar,
-		private readonly descriptor: Descriptor,
+		private readonly descriptor: GetWebviewDescriptor<ID>,
 		public readonly instanceId: string | undefined,
-		public readonly parent: GetParentType<Descriptor>,
+		public readonly parent: GetWebviewParent<ID>,
 		resolveProvider: (
 			container: Container,
-			host: WebviewHost,
+			host: WebviewHost<ID>,
 		) => Promise<WebviewProvider<State, SerializedState, ShowingArgs>>,
 	) {
-		this.id = descriptor.id;
+		this.id = descriptor.id as ID;
 		this.webview = parent.webview;
 
 		const isInEditor = 'onDidChangeViewState' in parent;
@@ -161,9 +190,15 @@ export class WebviewController<
 				window.onDidChangeWindowState(this.onWindowStateChanged, this),
 				parent.webview.onDidReceiveMessage(this.onMessageReceivedCore, this),
 				isInEditor
-					? parent.onDidChangeViewState(({ webviewPanel: { visible, active } }) =>
-							this.onParentVisibilityChanged(visible, active),
-					  )
+					? parent.onDidChangeViewState(({ webviewPanel }) => {
+							const { visible, active, viewColumn } = webviewPanel;
+							this.onParentVisibilityChanged(
+								visible,
+								active,
+								this.viewColumn != null && this.viewColumn !== viewColumn,
+							);
+							this.viewColumn = viewColumn;
+					  })
 					: parent.onDidChangeVisibility(() => this.onParentVisibilityChanged(this.visible, this.active)),
 				parent.onDidDispose(this.onParentDisposed, this),
 				...(this.provider.registerCommands?.() ?? []),
@@ -175,6 +210,8 @@ export class WebviewController<
 	private _disposed: boolean = false;
 	dispose() {
 		this._disposed = true;
+		this.cancellation?.cancel();
+		this.cancellation?.dispose();
 		resetContextKeys(this.descriptor.contextKeyPrefix);
 
 		this.provider?.onFocusChanged?.(false);
@@ -186,7 +223,7 @@ export class WebviewController<
 		this.disposable?.dispose();
 	}
 
-	registerWebviewCommand<T extends Partial<WebviewContext>>(command: string, callback: WebviewCommandCallback<T>) {
+	registerWebviewCommand<T extends Partial<WebviewContext>>(command: Commands, callback: WebviewCommandCallback<T>) {
 		return this._commandRegistrar.registerCommand(this.provider, this.id, this.instanceId, command, callback);
 	}
 
@@ -203,17 +240,21 @@ export class WebviewController<
 			'context.webview.id': this.id,
 			'context.webview.type': this.descriptor.type,
 			'context.webview.instanceId': this.instanceId,
-			'context.webview.host': this.isHost('editor') ? ('editor' as const) : ('view' as const),
+			'context.webview.host': this.isHost('editor') ? 'editor' : 'view',
 		};
 	}
 
-	isHost(type: 'editor'): this is WebviewPanelController<State, SerializedState, ShowingArgs>;
-	isHost(type: 'view'): this is WebviewViewController<State, SerializedState, ShowingArgs>;
+	isHost(
+		type: 'editor',
+	): this is WebviewPanelController<ID extends WebviewIds ? ID : never, State, SerializedState, ShowingArgs>;
+	isHost(
+		type: 'view',
+	): this is WebviewViewController<ID extends WebviewViewIds ? ID : never, State, SerializedState, ShowingArgs>;
 	isHost(
 		type: 'editor' | 'view',
 	): this is
-		| WebviewPanelController<State, SerializedState, ShowingArgs>
-		| WebviewViewController<State, SerializedState, ShowingArgs> {
+		| WebviewPanelController<ID extends WebviewIds ? ID : never, State, SerializedState, ShowingArgs>
+		| WebviewViewController<ID extends WebviewViewIds ? ID : never, State, SerializedState, ShowingArgs> {
 		return type === 'editor' ? this._isInEditor : !this._isInEditor;
 	}
 
@@ -313,6 +354,7 @@ export class WebviewController<
 		}
 
 		if (loading) {
+			this.cancellation ??= new CancellationTokenSource();
 			this.webview.html = await this.getHtml(this.webview);
 		}
 
@@ -358,6 +400,9 @@ export class WebviewController<
 
 	@debug()
 	async refresh(force?: boolean): Promise<void> {
+		this.cancellation?.cancel();
+		this.cancellation = new CancellationTokenSource();
+
 		if (force) {
 			this.clearPendingIpcNotifications();
 		}
@@ -389,7 +434,7 @@ export class WebviewController<
 		this.dispose();
 	}
 
-	@debug<WebviewController<State>['onMessageReceivedCore']>({
+	@debug<WebviewController<ID, State>['onMessageReceivedCore']>({
 		args: { 0: e => (e != null ? `${e.id}, method=${e.method}` : '<undefined>') },
 	})
 	private onMessageReceivedCore(e: IpcMessage) {
@@ -410,9 +455,9 @@ export class WebviewController<
 
 			case ExecuteCommand.is(e):
 				if (e.params.args != null) {
-					void executeCommand(e.params.command as Commands, ...e.params.args);
+					void executeCommand(e.params.command, ...e.params.args);
 				} else {
-					void executeCommand(e.params.command as Commands);
+					void executeCommand(e.params.command);
 				}
 				break;
 
@@ -430,7 +475,7 @@ export class WebviewController<
 		}
 	}
 
-	@debug<WebviewController<State>['onViewFocusChanged']>({
+	@debug<WebviewController<ID, State>['onViewFocusChanged']>({
 		args: { 0: e => `focused=${e.focused}, inputFocused=${e.inputFocused}` },
 	})
 	onViewFocusChanged(e: WebviewFocusChangedParams): void {
@@ -439,7 +484,12 @@ export class WebviewController<
 	}
 
 	@debug()
-	private onParentVisibilityChanged(visible: boolean, active?: boolean) {
+	private onParentVisibilityChanged(visible: boolean, active?: boolean, forceReload?: boolean) {
+		if (forceReload) {
+			void this.refresh();
+			return;
+		}
+
 		if (this.descriptor.webviewHostOptions?.retainContextWhenHidden !== true) {
 			if (visible) {
 				if (this._ready) {
@@ -456,7 +506,7 @@ export class WebviewController<
 		}
 
 		if (visible) {
-			void this.container.usage.track(`${this.descriptor.trackingFeature}:shown`);
+			void this.container.usage.track(`${this.descriptor.trackingFeature}:shown`).catch();
 
 			setContextKeys(this.descriptor.contextKeyPrefix);
 			if (active != null) {
@@ -521,6 +571,8 @@ export class WebviewController<
 			this.provider.includeEndOfBody?.(),
 		]);
 
+		this.replacePromisesWithIpcPromises(bootstrap);
+
 		const html = replaceWebviewHtmlTokens(
 			utf8TextDecoder.decode(bytes),
 			this.id,
@@ -547,6 +599,8 @@ export class WebviewController<
 		params: IpcCallParamsType<T>,
 		completionId?: string,
 	): Promise<boolean> {
+		this.replacePromisesWithIpcPromises(params);
+
 		let packed;
 		if (notificationType.pack && params != null) {
 			const sw = maybeStopWatch(
@@ -572,6 +626,8 @@ export class WebviewController<
 		const success = await this.postMessage(msg);
 		if (success) {
 			this._pendingIpcNotifications.clear();
+		} else if (notificationType === ipcPromiseSettled) {
+			this._pendingIpcPromiseNotifications.add({ msg: msg, timestamp: Date.now() });
 		} else {
 			this.addPendingIpcNotificationCore(notificationType, msg);
 		}
@@ -586,8 +642,55 @@ export class WebviewController<
 		return this.notify(requestType.response, params, msg.completionId);
 	}
 
-	@serialize()
-	@debug<WebviewController<State>['postMessage']>({
+	private replacePromisesWithIpcPromises(data: unknown) {
+		const pendingPromises: [Promise<unknown>, IpcPromise][] = [];
+		this.replacePromisesWithIpcPromisesCore(data, pendingPromises);
+		if (pendingPromises.length === 0) return;
+
+		const cancellation = this.cancellation?.token;
+		queueMicrotask(() => {
+			for (const [promise, ipcPromise] of pendingPromises) {
+				promise.then(
+					r => {
+						if (cancellation?.isCancellationRequested) {
+							debugger;
+							return;
+						}
+						return this.notify(ipcPromiseSettled, { status: 'fulfilled', value: r }, ipcPromise.id);
+					},
+					(ex: unknown) => {
+						if (cancellation?.isCancellationRequested) {
+							debugger;
+							return;
+						}
+						return this.notify(ipcPromiseSettled, { status: 'rejected', reason: ex }, ipcPromise.id);
+					},
+				);
+			}
+		});
+	}
+
+	private replacePromisesWithIpcPromisesCore(data: unknown, pendingPromises: [Promise<unknown>, IpcPromise][]) {
+		if (data == null || typeof data !== 'object') return;
+
+		for (const key in data) {
+			const value = (data as Record<string, unknown>)[key];
+			if (value instanceof Promise) {
+				const ipcPromise: IpcPromise = {
+					__ipc: 'promise',
+					id: this.nextIpcId(),
+					method: ipcPromiseSettled.method,
+				};
+				(data as Record<string, unknown>)[key] = ipcPromise;
+				pendingPromises.push([value, ipcPromise]);
+			}
+
+			this.replacePromisesWithIpcPromisesCore(value, pendingPromises);
+		}
+	}
+
+	@sequentialize()
+	@debug<WebviewController<ID, State>['postMessage']>({
 		args: false,
 		enter: m => `(${m.id}|${m.method}${m.completionId ? `+${m.completionId}` : ''})`,
 	})
@@ -637,7 +740,11 @@ export class WebviewController<
 		return success;
 	}
 
-	private _pendingIpcNotifications = new Map<IpcNotification, IpcMessage | (() => Promise<boolean>)>();
+	private _pendingIpcNotifications = new Map<
+		IpcNotification,
+		{ msg: IpcMessage | (() => Promise<boolean>); timestamp: number }
+	>();
+	private _pendingIpcPromiseNotifications = new Set<{ msg: IpcMessage; timestamp: number }>();
 
 	addPendingIpcNotification(
 		type: IpcNotification<any>,
@@ -659,7 +766,7 @@ export class WebviewController<
 			debugger;
 			return;
 		}
-		this._pendingIpcNotifications.set(type, msgOrFn);
+		this._pendingIpcNotifications.set(type, { msg: msgOrFn, timestamp: Date.now() });
 	}
 
 	clearPendingIpcNotifications() {
@@ -667,15 +774,24 @@ export class WebviewController<
 	}
 
 	sendPendingIpcNotifications() {
-		if (!this._ready || this._pendingIpcNotifications.size === 0) return;
+		if (
+			!this._ready ||
+			(this._pendingIpcNotifications.size === 0 && this._pendingIpcPromiseNotifications.size === 0)
+		) {
+			return;
+		}
 
-		const ipcs = new Map(this._pendingIpcNotifications);
+		const ipcs = [...this._pendingIpcNotifications.values(), ...this._pendingIpcPromiseNotifications.values()].sort(
+			(a, b) => a.timestamp - b.timestamp,
+		);
 		this._pendingIpcNotifications.clear();
-		for (const msgOrFn of ipcs.values()) {
-			if (typeof msgOrFn === 'function') {
-				void msgOrFn();
+		this._pendingIpcPromiseNotifications.clear();
+
+		for (const { msg } of ipcs.values()) {
+			if (typeof msg === 'function') {
+				void msg();
 			} else {
-				void this.postMessage(msgOrFn);
+				void this.postMessage(msg);
 			}
 		}
 	}

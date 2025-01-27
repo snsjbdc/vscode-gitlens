@@ -1,4 +1,5 @@
-import type { GkProviderId } from '../../gk/models/repositoryIdentities';
+import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks';
+import type { GkProviderId } from '../models/repositoryIdentities';
 import { GerritRemote } from './gerrit';
 import type { RemoteProviderId } from './remoteProvider';
 
@@ -17,6 +18,14 @@ export class GoogleSourceRemote extends GerritRemote {
 
 	override get name() {
 		return this.formatName('Google Source');
+	}
+
+	protected override get issueLinkPattern(): string {
+		throw new Error('unsupported');
+	}
+
+	override get autolinks(): (AutolinkReference | DynamicAutolinkReference)[] {
+		return [];
 	}
 
 	protected override get baseUrl(): string {

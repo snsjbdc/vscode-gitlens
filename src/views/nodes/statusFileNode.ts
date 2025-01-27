@@ -2,14 +2,15 @@ import type { Command } from 'vscode';
 import { MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState } from 'vscode';
 import type { DiffWithCommandArgs } from '../../commands/diffWith';
 import type { DiffWithPreviousCommandArgs } from '../../commands/diffWithPrevious';
-import { Commands } from '../../constants.commands';
+import { GlCommand } from '../../constants.commands';
 import { StatusFileFormatter } from '../../git/formatters/statusFormatter';
 import { GitUri } from '../../git/gitUri';
 import type { GitFileWithCommit } from '../../git/models/file';
-import { getGitFileStatusIcon, isGitFileChange } from '../../git/models/file';
-import { shortenRevision } from '../../git/models/reference';
+import { isGitFileChange } from '../../git/models/fileChange';
+import { getGitFileStatusIcon } from '../../git/utils/fileStatus.utils';
+import { shortenRevision } from '../../git/utils/revision.utils';
+import { relativeDir } from '../../system/-webview/path';
 import { joinPaths } from '../../system/path';
-import { relativeDir } from '../../system/vscode/path';
 import type { ViewsWithCommits } from '../viewBase';
 import { getFileTooltip, ViewFileNode } from './abstract/viewFileNode';
 import type { ViewNode } from './abstract/viewNode';
@@ -215,7 +216,7 @@ export class StatusFileNode extends ViewFileNode<'status-file', ViewsWithCommits
 			};
 			return {
 				title: 'Open Changes with Previous Revision',
-				command: Commands.DiffWithPrevious,
+				command: GlCommand.DiffWithPrevious,
 				arguments: [undefined, commandArgs],
 			};
 		}
@@ -279,7 +280,7 @@ export class StatusFileNode extends ViewFileNode<'status-file', ViewsWithCommits
 
 		return {
 			title: 'Open Changes',
-			command: Commands.DiffWith,
+			command: GlCommand.DiffWith,
 			arguments: [commandArgs],
 		};
 	}

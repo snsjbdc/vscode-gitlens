@@ -1,4 +1,3 @@
-import { getPlatform } from '@env/platform';
 import type {
 	CommitType,
 	GraphColumnMode,
@@ -15,17 +14,22 @@ import type {
 } from '@gitkraken/gitkraken-components';
 import GraphContainer, { CommitDateTimeSources, refZone } from '@gitkraken/gitkraken-components';
 import type { SlChangeEvent } from '@shoelace-style/shoelace';
-import { SlOption, SlSelect } from '@shoelace-style/shoelace/dist/react';
+import SlOption from '@shoelace-style/shoelace/dist/react/option/index.js';
+import SlSelect from '@shoelace-style/shoelace/dist/react/select/index.js';
 import type { FormEvent, MouseEvent, ReactElement } from 'react';
 import React, { createElement, useEffect, useMemo, useRef, useState } from 'react';
+import { getPlatform } from '@env/platform';
 import type { ConnectCloudIntegrationsCommandArgs } from '../../../../commands/cloudIntegrations';
 import type { BranchGitCommandArgs } from '../../../../commands/git/branch';
 import type { DateStyle, GraphBranchesVisibility } from '../../../../config';
-import { Commands } from '../../../../constants.commands';
+import { GlCommand } from '../../../../constants.commands';
 import type { SearchQuery } from '../../../../constants.search';
-import type { Subscription } from '../../../../plus/gk/account/subscription';
-import { isSubscriptionPaid } from '../../../../plus/gk/account/subscription';
+import type { Subscription } from '../../../../plus/gk/models/subscription';
+import { isSubscriptionPaid } from '../../../../plus/gk/utils/subscription.utils';
 import type { LaunchpadCommandArgs } from '../../../../plus/launchpad/launchpad';
+import { createCommandLink } from '../../../../system/commands';
+import { filterMap, first, groupByFilterMap, join } from '../../../../system/iterable';
+import { createWebviewCommandLink } from '../../../../system/webview';
 import type {
 	DidEnsureRowParams,
 	DidGetRowHoverParams,
@@ -48,7 +52,7 @@ import type {
 	State,
 	UpdateGraphConfigurationParams,
 	UpdateStateCallback,
-} from '../../../../plus/webviews/graph/protocol';
+} from '../../../plus/graph/protocol';
 import {
 	DidChangeAvatarsNotification,
 	DidChangeBranchStateNotification,
@@ -64,10 +68,8 @@ import {
 	DidChangeWorkingTreeNotification,
 	DidFetchNotification,
 	DidSearchNotification,
-} from '../../../../plus/webviews/graph/protocol';
-import { createCommandLink } from '../../../../system/commands';
-import { filterMap, first, groupByFilterMap, join } from '../../../../system/iterable';
-import { createWebviewCommandLink } from '../../../../system/webview';
+	DidStartFeaturePreviewNotification,
+} from '../../../plus/graph/protocol';
 import type { IpcNotification } from '../../../protocol';
 import { DidChangeHostWindowFocusNotification } from '../../../protocol';
 import { GlButton } from '../../shared/components/button.react';
@@ -91,11 +93,25 @@ import type {
 import type { DateTimeFormat } from '../../shared/date';
 import { formatDate, fromNow } from '../../shared/date';
 import { emitTelemetrySentEvent } from '../../shared/telemetry';
+import { GlMergeConflictWarning } from '../shared/components/merge-rebase-status.react';
 import { GitActionsButtons } from './actions/gitActionsButtons';
 import { GlGraphHover } from './hover/graphHover.react';
 import type { GraphMinimapDaySelectedEventDetail } from './minimap/minimap';
 import { GlGraphMinimapContainer } from './minimap/minimap-container.react';
 import { GlGraphSideBar } from './sidebar/sidebar.react';
+
+function getRemoteIcon(type: string | number) {
+	switch (type) {
+		case 'head':
+			return 'vm';
+		case 'remote':
+			return 'cloud';
+		case 'tag':
+			return 'tag';
+		default:
+			return '';
+	}
+}
 
 export interface GraphWrapperProps {
 	nonce?: string;
@@ -164,6 +180,9 @@ const createIconElements = (): Record<string, ReactElement> => {
 		'changes',
 		'files',
 		'worktree',
+		'issue-github',
+		'issue-gitlab',
+		'issue-jiraCloud',
 	];
 
 	const miniIconList = ['upstream-ahead', 'upstream-behind'];
@@ -282,6 +301,8 @@ export function GraphWrapper({
 	const [windowFocused, setWindowFocused] = useState(state.windowFocused);
 	const [allowed, setAllowed] = useState(state.allowed ?? false);
 	const [subscription, setSubscription] = useState<Subscription | undefined>(state.subscription);
+	const [featurePreview, setFeaturePreview] = useState(state.featurePreview);
+
 	// search state
 	const searchEl = useRef<GlSearchBox>(null);
 	const [searchQuery, setSearchQuery] = useState<SearchQuery | undefined>(undefined);
@@ -318,6 +339,10 @@ export function GraphWrapper({
 					setStyleProps(state.theming);
 				}
 				break;
+			case DidStartFeaturePreviewNotification:
+				setFeaturePreview(state.featurePreview);
+				setAllowed(state.allowed ?? false);
+				break;
 			case DidChangeAvatarsNotification:
 				setAvatars(state.avatars);
 				break;
@@ -347,6 +372,7 @@ export function GraphWrapper({
 				setIsLoading(state.loading);
 				break;
 			case DidChangeRowsStatsNotification:
+				hover.current?.reset();
 				setRowsStats(state.rowsStats);
 				setRowsStatsLoading(state.rowsStatsLoading);
 				break;
@@ -420,6 +446,7 @@ export function GraphWrapper({
 				setRepo(repos.find(item => item.path === state.selectedRepository));
 				// setGraphDateFormatter(getGraphDateFormatter(config));
 				setSubscription(state.subscription);
+				setFeaturePreview(state.featurePreview);
 
 				const { results, resultsError } = getSearchResultModel(state);
 				setSearchResultsError(resultsError);
@@ -859,7 +886,25 @@ export function GraphWrapper({
 		onChangeColumns?.(graphColumnsConfig);
 	};
 
+	// dirty trick to avoid mutations on the GraphContainer side
+	const fixedExcludeRefsById = useMemo(() => ({ ...excludeRefsById }), [excludeRefsById]);
 	const handleOnToggleRefsVisibilityClick = (_event: any, refs: GraphRefOptData[], visible: boolean) => {
+		if (!visible) {
+			document.getElementById('hiddenRefs')?.animate(
+				[
+					{ offset: 0, background: 'transparent' },
+					{
+						offset: 0.4,
+						background: 'var(--vscode-statusBarItem-warningBackground)',
+					},
+					{ offset: 1, background: 'transparent' },
+				],
+				{
+					duration: 1000,
+					iterations: !Object.keys(fixedExcludeRefsById ?? {}).length ? 2 : 1,
+				},
+			);
+		}
 		onChangeRefsVisibility?.(refs, visible);
 	};
 
@@ -886,6 +931,7 @@ export function GraphWrapper({
 
 	const handleRowContextMenu = (_event: React.MouseEvent<any>, graphZoneType: GraphZoneType, graphRow: GraphRow) => {
 		if (graphZoneType === refZone) return;
+		hover.current?.hide();
 
 		// If the row is in the current selection, use the typed selection context, otherwise clear it
 		const newSelectionContext = selectionContexts?.selectedShas.has(graphRow.sha)
@@ -1035,14 +1081,16 @@ export function GraphWrapper({
 											})
 										}
 									>
-										<span
-											className={
-												repo.provider.icon === 'cloud'
-													? 'codicon codicon-cloud action-button__icon'
-													: `glicon glicon-provider-${repo.provider.icon} action-button__icon`
-											}
-											aria-hidden="true"
-										>
+										<span>
+											<CodeIcon
+												className="action-button__icon"
+												icon={
+													repo.provider.icon === 'cloud'
+														? 'cloud'
+														: `gl-provider-${repo.provider.icon}`
+												}
+												aria-hidden="true"
+											/>
 											{repo.provider.integration?.connected && (
 												<GlIndicator
 													style={{
@@ -1060,24 +1108,24 @@ export function GraphWrapper({
 										<hr />
 										{repo.provider.integration?.connected ? (
 											<span>
-												<span
+												<CodeIcon
 													style={{ marginTop: '-3px' }}
-													className="codicon codicon-check"
+													icon="check"
 													aria-hidden="true"
-												></span>{' '}
+												/>{' '}
 												Connected to {repo.provider.name}
 											</span>
 										) : (
 											repo.provider.integration?.connected === false && (
 												<>
-													<span
+													<CodeIcon
 														style={{ marginTop: '-3px' }}
-														className="codicon codicon-plug"
+														icon="plug"
 														aria-hidden="true"
-													></span>{' '}
+													/>{' '}
 													<a
 														href={createCommandLink<ConnectCloudIntegrationsCommandArgs>(
-															'gitlens.plus.cloudIntegrations.connect' as Commands,
+															'gitlens.plus.cloudIntegrations.connect',
 															{
 																integrationIds: [repo.provider.integration.id],
 																source: 'graph',
@@ -1096,7 +1144,7 @@ export function GraphWrapper({
 									<GlButton
 										appearance="toolbar"
 										href={createCommandLink<ConnectCloudIntegrationsCommandArgs>(
-											'gitlens.plus.cloudIntegrations.connect' as Commands,
+											'gitlens.plus.cloudIntegrations.connect',
 											{
 												integrationIds: [repo.provider.integration.id],
 												source: 'graph',
@@ -1122,12 +1170,11 @@ export function GraphWrapper({
 								disabled={repos.length < 2}
 								onClick={() => handleChooseRepository()}
 							>
-								{repo?.formattedName ?? 'none selected'}
+								<span className="action-button__truncated">
+									{repo?.formattedName ?? 'none selected'}
+								</span>
 								{repos.length > 1 && (
-									<span
-										className="codicon codicon-chevron-down action-button__more"
-										aria-hidden="true"
-									></span>
+									<CodeIcon className="action-button__more" icon="chevron-down" aria-hidden="true" />
 								)}
 							</button>
 							<span slot="content">Switch to Another Repository...</span>
@@ -1135,7 +1182,7 @@ export function GraphWrapper({
 						{allowed && repo && (
 							<>
 								<span>
-									<span className="codicon codicon-chevron-right"></span>
+									<CodeIcon icon="chevron-right" />
 								</span>
 								{branchState?.pr && (
 									<GlPopover placement="bottom">
@@ -1179,27 +1226,25 @@ export function GraphWrapper({
 									>
 										{!branchState?.pr ? (
 											branchState?.worktree ? (
-												<span
-													className="glicon glicon-repositories-view"
-													aria-hidden="true"
-												></span>
+												<CodeIcon icon="gl-worktrees-view" aria-hidden="true" />
 											) : (
-												<span className="codicon codicon-git-branch" aria-hidden="true"></span>
+												<CodeIcon icon="git-branch" aria-hidden="true" />
 											)
 										) : (
 											''
 										)}
 										<span className="action-button__truncated">{branchName}</span>
-										<span
-											className="codicon codicon-chevron-down action-button__more"
+										<CodeIcon
+											className="action-button__more"
+											icon="chevron-down"
 											aria-hidden="true"
-										></span>
+										/>
 									</a>
 									<div slot="content">
 										<span>
 											Switch to Another Branch...
 											<hr />
-											<span className="codicon codicon-git-branch" aria-hidden="true"></span>{' '}
+											<CodeIcon icon="git-branch" aria-hidden="true" />{' '}
 											<span className="md-code">{branchName}</span>
 											{branchState?.worktree ? <i> (in a worktree)</i> : ''}
 										</span>
@@ -1214,7 +1259,7 @@ export function GraphWrapper({
 									</span>
 								</GlButton>
 								<span>
-									<span className="codicon codicon-chevron-right"></span>
+									<CodeIcon icon="chevron-right" />
 								</span>
 								<GitActionsButtons
 									branchName={branchName}
@@ -1229,7 +1274,7 @@ export function GraphWrapper({
 						<GlTooltip placement="bottom">
 							<a
 								className="action-button"
-								href={createCommandLink<BranchGitCommandArgs>(Commands.GitCommandsBranch, {
+								href={createCommandLink<BranchGitCommandArgs>(GlCommand.GitCommandsBranch, {
 									state: {
 										subcommand: 'create',
 										reference: branch,
@@ -1238,10 +1283,11 @@ export function GraphWrapper({
 									confirm: true,
 								})}
 							>
-								<span className="codicon codicon-custom-git-branch-create action-button__icon"></span>
+								<CodeIcon className="action-button__icon" icon="custom-start-work" />
 							</a>
 							<span slot="content">
-								Create New Branch from <span className="codicon codicon-git-branch"></span>
+								Create New Branch from
+								<CodeIcon icon="git-branch" />
 								<span className="md-code">{branchName}</span>
 							</span>
 						</GlTooltip>
@@ -1254,13 +1300,28 @@ export function GraphWrapper({
 								)}`}
 								className="action-button"
 							>
-								<span className="codicon codicon-rocket"></span>
+								<CodeIcon icon="rocket" />
 							</a>
 							<span slot="content">
 								<span style={{ whiteSpace: 'break-spaces' }}>
 									<strong>Launchpad</strong> &mdash; organizes your pull requests into actionable
 									groups to help you focus and keep your team unblocked
 								</span>
+							</span>
+						</GlTooltip>
+						<GlTooltip placement="bottom">
+							<a
+								href={'command:gitlens.views.home.focus'}
+								className="action-button"
+								aria-label={`Open GitLens Home View`}
+							>
+								<span>
+									<CodeIcon className="action-button__icon" icon={'gl-gitlens'} aria-hidden="true" />
+								</span>
+							</a>
+							<span slot="content">
+								<strong>GitLens Home</strong> — track, manage, and collaborate on your branches and pull
+								requests, all in one intuitive hub
 							</span>
 						</GlTooltip>
 						{(subscription == null || !isSubscriptionPaid(subscription)) && (
@@ -1271,6 +1332,25 @@ export function GraphWrapper({
 						)}
 					</div>
 				</div>
+				{allowed &&
+					workingTreeStats != null &&
+					(workingTreeStats.hasConflicts || workingTreeStats.pausedOpStatus) && (
+						<div className="merge-conflict-warning">
+							<GlMergeConflictWarning
+								className="merge-conflict-warning__content"
+								conflicts={workingTreeStats.hasConflicts}
+								pausedOpStatus={workingTreeStats.pausedOpStatus}
+								skipCommand="gitlens.graph.skipPausedOperation"
+								continueCommand="gitlens.graph.continuePausedOperation"
+								abortCommand="gitlens.graph.abortPausedOperation"
+								openEditorCommand="gitlens.graph.openRebaseEditor"
+								webviewCommandContext={{
+									webview: state.webviewId,
+									webviewInstance: state.webviewInstanceId,
+								}}
+							></GlMergeConflictWarning>
+						</div>
+					)}
 				{allowed && (
 					<div className="titlebar__row">
 						<div className="titlebar__group">
@@ -1302,20 +1382,75 @@ export function GraphWrapper({
 									<SlOption value="current">Current Branch</SlOption>
 								</SlSelect>
 							</GlTooltip>
+							<div className={`shrink ${!Object.values(excludeRefsById ?? {}).length && 'hidden'}`}>
+								<GlPopover
+									className="popover"
+									placement="bottom-start"
+									trigger="click focus"
+									arrow={false}
+									distance={0}
+								>
+									<GlTooltip placement="top" slot="anchor">
+										<button type="button" id="hiddenRefs" className="action-button">
+											<CodeIcon icon={`eye-closed`} />
+											{Object.values(excludeRefsById ?? {}).length}
+											<CodeIcon
+												className="action-button__more"
+												icon="chevron-down"
+												aria-hidden="true"
+											/>
+										</button>
+										<span slot="content">Hidden Branches / Tags</span>
+									</GlTooltip>
+									<div slot="content">
+										<MenuLabel>Hidden Branches / Tags</MenuLabel>
+										{excludeRefsById &&
+											Object.keys(excludeRefsById).length &&
+											[...Object.values(excludeRefsById), null].map(ref =>
+												ref ? (
+													<MenuItem
+														// key prop is skipped intentionally. It allows me to not hide the dropdown after click (I don't know why)
+														onClick={event => {
+															handleOnToggleRefsVisibilityClick(event, [ref], true);
+														}}
+														className="flex-gap"
+													>
+														<CodeIcon icon={getRemoteIcon(ref.type)}></CodeIcon>
+														<span>{ref.name}</span>
+													</MenuItem>
+												) : (
+													// One more weird case. If I render it outside the listed items, the dropdown is hidden after click on the last item
+													<MenuItem
+														onClick={event => {
+															handleOnToggleRefsVisibilityClick(
+																event,
+																Object.values(excludeRefsById ?? {}),
+																true,
+															);
+														}}
+													>
+														Show All
+													</MenuItem>
+												),
+											)}
+									</div>
+								</GlPopover>
+							</div>
 							<GlPopover
 								className="popover"
 								placement="bottom-start"
-								trigger="focus"
+								trigger="click focus"
 								arrow={false}
 								distance={0}
 							>
 								<GlTooltip placement="top" slot="anchor">
 									<button type="button" className="action-button">
-										<span className={`codicon codicon-filter${hasFilters ? '-filled' : ''}`}></span>
-										<span
-											className="codicon codicon-chevron-down action-button__more"
+										<CodeIcon icon={`filter${hasFilters ? '-filled' : ''}`} />
+										<CodeIcon
+											className="action-button__more"
+											icon="chevron-down"
 											aria-hidden="true"
-										></span>
+										/>
 									</button>
 									<span slot="content">Graph Filtering</span>
 								</GlTooltip>
@@ -1384,7 +1519,6 @@ export function GraphWrapper({
 							</span>
 							<GlSearchBox
 								ref={searchEl}
-								label="Search Commits"
 								step={searchPosition}
 								total={searchResults?.count ?? 0}
 								valid={Boolean(searchQuery?.query && searchQuery.query.length > 2)}
@@ -1413,23 +1547,24 @@ export function GraphWrapper({
 										aria-checked={graphConfig?.minimap ?? false}
 										onClick={handleOnMinimapToggle}
 									>
-										<span className="codicon codicon-graph-line action-button__icon"></span>
+										<CodeIcon className="action-button__icon" icon="graph-line"></CodeIcon>
 									</button>
 									<span slot="content">Toggle Minimap</span>
 								</GlTooltip>
 								<GlPopover
 									className="popover"
 									placement="bottom-end"
-									trigger="focus"
+									trigger="click focus"
 									arrow={false}
 									distance={0}
 								>
 									<GlTooltip placement="top" distance={7} slot="anchor">
 										<button type="button" className="action-button" aria-label="Minimap Options">
-											<span
-												className="codicon codicon-chevron-down action-button__more"
+											<CodeIcon
+												className="action-button__more"
+												icon="chevron-down"
 												aria-hidden="true"
-											></span>
+											/>
 										</button>
 										<span slot="content">Minimap Options</span>
 									</GlTooltip>
@@ -1530,10 +1665,22 @@ export function GraphWrapper({
 			</header>
 			<GlFeatureGate
 				className="graph-app__gate"
+				featurePreview={featurePreview}
+				featurePreviewCommandLink={
+					featurePreview
+						? createWebviewCommandLink(
+								GlCommand.PlusContinueFeaturePreview,
+								state.webviewId,
+								state.webviewInstanceId,
+								{ feature: featurePreview.feature },
+						  )
+						: undefined
+				}
 				appearance="alert"
 				featureWithArticleIfNeeded="the Commit Graph"
 				source={{ source: 'graph', detail: 'gate' }}
 				state={subscription?.state}
+				webroot={state.webroot}
 				visible={!allowed}
 			>
 				<p slot="feature">

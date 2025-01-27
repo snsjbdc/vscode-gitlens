@@ -1,27 +1,55 @@
 export type AnthropicModels =
-	| 'claude-instant-1'
-	| 'claude-2'
-	| 'claude-2.1'
-	| 'claude-3-opus-20240229'
-	| 'claude-3-opus-latest'
-	| 'claude-3-sonnet-20240229'
-	| 'claude-3-5-sonnet-20240620'
-	| 'claude-3-5-sonnet-20241022'
 	| 'claude-3-5-sonnet-latest'
-	| 'claude-3-haiku-20240307';
+	| 'claude-3-5-sonnet-20241022'
+	| 'claude-3-5-sonnet-20240620'
+	| 'claude-3-5-haiku-20241022'
+	| 'claude-3-5-haiku-latest'
+	| 'claude-3-opus-latest'
+	| 'claude-3-opus-20240229'
+	| 'claude-3-sonnet-20240229'
+	| 'claude-3-haiku-20240307'
+	| 'claude-2.1';
 
-export type GeminiModels = 'gemini-1.0-pro' | 'gemini-1.5-pro-latest' | 'gemini-1.5-flash-latest';
+export type DeepSeekModels = 'deepseek-chat' | 'deepseek-reasoner';
 
-export type HuggingChatModels =
-	| 'google/gemma-1.1-2b-it'
-	| 'meta-llama/Llama-3.2-3B-Instruct'
-	| 'microsoft/Phi-3-mini-4k-instruct'
-	| 'HuggingFaceH4/starchat2-15b-v0.1'
-	| 'mistralai/Mistral-Nemo-Instruct-2407';
+export type GeminiModels =
+	| 'gemini-2.0-flash-exp'
+	| 'gemini-2.0-flash-thinking-exp-01-21'
+	| 'gemini-exp-1206'
+	| 'gemini-exp-1121'
+	| 'gemini-1.5-pro-latest'
+	| 'gemini-1.5-flash-latest'
+	| 'gemini-1.5-flash-8b'
+	| 'gemini-1.0-pro';
 
-export type OpenAIModels =
+export type GitHubModels =
 	| 'gpt-4o'
 	| 'gpt-4o-mini'
+	| 'o1-preview'
+	| 'o1-mini'
+	| 'Phi-3.5-MoE-instruct'
+	| 'Phi-3.5-mini-instruct'
+	| 'AI21-Jamba-1.5-Large'
+	| 'AI21-Jamba-1.5-Mini';
+
+export type HuggingFaceModels =
+	| 'meta-llama/Llama-3.2-11B-Vision-Instruct'
+	| 'Qwen/Qwen2.5-72B-Instruct'
+	| 'NousResearch/Hermes-3-Llama-3.1-8B'
+	| 'mistralai/Mistral-Nemo-Instruct-2407'
+	| 'microsoft/Phi-3.5-mini-instruct';
+
+export type OpenAIModels =
+	| 'o1-preview'
+	| 'o1-preview-2024-09-12'
+	| 'o1-mini'
+	| 'o1-mini-2024-09-12'
+	| 'gpt-4o'
+	| 'gpt-4o-2024-08-06'
+	| 'gpt-4o-2024-05-13'
+	| 'chatgpt-4o-latest'
+	| 'gpt-4o-mini'
+	| 'gpt-4o-mini-2024-07-18'
 	| 'gpt-4-turbo'
 	| 'gpt-4-turbo-2024-04-09'
 	| 'gpt-4-turbo-preview'
@@ -40,25 +68,31 @@ export type VSCodeAIModels = `${string}:${string}`;
 
 export type xAIModels = 'grok-beta';
 
-export type AIProviders = 'anthropic' | 'gemini' | 'huggingchat' | 'openai' | 'vscode' | 'xai';
-export type AIModels<Provider extends AIProviders = AIProviders> = Provider extends 'openai'
-	? OpenAIModels
-	: Provider extends 'anthropic'
-	  ? AnthropicModels
+export type AIProviders = 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'huggingface' | 'openai' | 'vscode' | 'xai';
+export type AIModels<Provider extends AIProviders = AIProviders> = Provider extends 'anthropic'
+	? AnthropicModels
+	: Provider extends 'deepseek'
+	  ? DeepSeekModels
 	  : Provider extends 'gemini'
 	    ? GeminiModels
-	    : Provider extends 'huggingchat'
-	      ? HuggingChatModels
-	      : Provider extends 'vscode'
-	        ? VSCodeAIModels
-	        : Provider extends 'xai'
-	          ? xAIModels
-	          : AnthropicModels | GeminiModels | OpenAIModels | xAIModels;
+	    : Provider extends 'github'
+	      ? GitHubModels
+	      : Provider extends 'huggingface'
+	        ? HuggingFaceModels
+	        : Provider extends 'openai'
+	          ? OpenAIModels
+	          : Provider extends 'vscode'
+	            ? VSCodeAIModels
+	            : Provider extends 'xai'
+	              ? xAIModels
+	              : AnthropicModels | GeminiModels | OpenAIModels | xAIModels;
 
 export type SupportedAIModels =
 	| `anthropic:${AIModels<'anthropic'>}`
+	| `deepseek:${AIModels<'deepseek'>}`
+	| `github:${AIModels<'github'>}`
 	| `google:${AIModels<'gemini'>}`
-	| `huggingchat:${AIModels<'huggingchat'>}`
+	| `huggingface:${AIModels<'huggingface'>}`
 	| `openai:${AIModels<'openai'>}`
 	| `xai:${AIModels<'xai'>}`
 	| 'vscode';

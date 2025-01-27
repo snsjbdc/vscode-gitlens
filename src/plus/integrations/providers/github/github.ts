@@ -1,5 +1,3 @@
-import { fetch, getProxyAgent, wrapForForcedInsecureSSL } from '@env/fetch';
-import { isWeb } from '@env/platform';
 import { graphql, GraphqlResponseError } from '@octokit/graphql';
 import { request } from '@octokit/request';
 import { RequestError } from '@octokit/request-error';
@@ -7,6 +5,8 @@ import type { Endpoints, OctokitResponse, RequestParameters } from '@octokit/typ
 import type { HttpsProxyAgent } from 'https-proxy-agent';
 import type { CancellationToken, Disposable, Event } from 'vscode';
 import { EventEmitter, Uri, window } from 'vscode';
+import { fetch, getProxyAgent, wrapForForcedInsecureSSL } from '@env/fetch';
+import { isWeb } from '@env/platform';
 import type { Container } from '../../../../container';
 import {
 	AuthenticationError,
@@ -19,19 +19,26 @@ import {
 import type { PagedResult, RepositoryVisibility } from '../../../../git/gitProvider';
 import type { Account, UnidentifiedAuthor } from '../../../../git/models/author';
 import type { DefaultBranch } from '../../../../git/models/defaultBranch';
-import type { IssueOrPullRequest, SearchedIssue } from '../../../../git/models/issue';
+import type { Issue, SearchedIssue } from '../../../../git/models/issue';
+import type { IssueOrPullRequest } from '../../../../git/models/issueOrPullRequest';
 import type { PullRequest, SearchedPullRequest } from '../../../../git/models/pullRequest';
 import { PullRequestMergeMethod } from '../../../../git/models/pullRequest';
-import type { GitRevisionRange } from '../../../../git/models/reference';
-import { createRevisionRange, getRevisionRangeParts, isRevisionRange, isSha } from '../../../../git/models/reference';
 import type { Provider } from '../../../../git/models/remoteProvider';
 import type { RepositoryMetadata } from '../../../../git/models/repositoryMetadata';
+import type { GitRevisionRange } from '../../../../git/models/revision';
 import type { GitUser } from '../../../../git/models/user';
 import { getGitHubNoReplyAddressParts } from '../../../../git/remotes/github';
+import {
+	createRevisionRange,
+	getRevisionRangeParts,
+	isRevisionRange,
+	isSha,
+} from '../../../../git/utils/revision.utils';
 import {
 	showIntegrationRequestFailed500WarningMessage,
 	showIntegrationRequestTimedOutWarningMessage,
 } from '../../../../messages';
+import { configuration } from '../../../../system/-webview/configuration';
 import { debug } from '../../../../system/decorators/log';
 import { uniqueBy } from '../../../../system/iterable';
 import { Logger } from '../../../../system/logger';
@@ -41,7 +48,6 @@ import { maybeStopWatch } from '../../../../system/stopwatch';
 import { base64 } from '../../../../system/string';
 import type { Version } from '../../../../system/version';
 import { fromString, satisfies } from '../../../../system/version';
-import { configuration } from '../../../../system/vscode/configuration';
 import type {
 	GitHubBlame,
 	GitHubBlameRange,
@@ -98,6 +104,7 @@ headRepository {
 	url
 }
 isCrossRepository
+isDraft
 mergedAt
 permalink
 repository {
@@ -122,7 +129,6 @@ assignees(first: 10) {
 }
 checksUrl
 deletions
-isDraft
 mergeable
 mergedBy {
 	login
@@ -151,8 +157,14 @@ reviewRequests(first: 10) {
 		}
 	}
 }
-statusCheckRollup {
-	state
+commits(last: 1) {
+	nodes {
+		commit {
+			statusCheckRollup {
+				state
+			}
+		}
+	}
 }
 totalCommentsCount
 viewerCanUpdate
@@ -190,6 +202,7 @@ repository {
 		login
 	}
 	viewerPermission
+	url
 }
 `;
 
@@ -614,6 +627,73 @@ export class GitHubApi implements Disposable {
 				url: issue.url,
 				state: fromGitHubIssueOrPullRequestState(issue.state),
 			};
+		} catch (ex) {
+			if (ex instanceof RequestNotFoundError) return undefined;
+
+			throw this.handleException(ex, provider, scope);
+		}
+	}
+
+	@debug<GitHubApi['getIssue']>({ args: { 0: p => p.name, 1: '<token>' } })
+	async getIssue(
+		provider: Provider,
+		token: string,
+		owner: string,
+		repo: string,
+		number: number,
+		options?: {
+			baseUrl?: string;
+			avatarSize?: number;
+			includeBody?: boolean;
+		},
+	): Promise<Issue | undefined> {
+		const scope = getLogScope();
+
+		interface QueryResult {
+			repository:
+				| {
+						issue: GitHubIssue | null | undefined;
+				  }
+				| null
+				| undefined;
+		}
+
+		try {
+			const query = `query getIssue(
+			$owner: String!
+			$repo: String!
+			$number: Int!
+			$avatarSize: Int
+		) {
+			repository(name: $repo, owner: $owner) {
+				issue(number: $number) {
+					${gqIssueFragment}${
+						options?.includeBody
+							? `
+						body
+						`
+							: ''
+					}
+				}
+			}
+		}`;
+
+			const rsp = await this.graphql<QueryResult>(
+				provider,
+				token,
+				query,
+				{
+					...options,
+					owner: owner,
+					repo: repo,
+					number: number,
+				},
+				scope,
+			);
+
+			if (rsp?.repository?.issue == null) return undefined;
+
+			return fromGitHubIssue(rsp.repository.issue, provider);
 		} catch (ex) {
 			if (ex instanceof RequestNotFoundError) return undefined;
 
@@ -1187,8 +1267,8 @@ export class GitHubApi implements Disposable {
 		return { ...(commit ?? results.values[0]), viewer: results.viewer };
 	}
 
-	@debug<GitHubApi['getCommitBranches']>({ args: { 0: '<token>' } })
-	async getCommitBranches(
+	@debug<GitHubApi['getBranchesWithCommits']>({ args: { 0: '<token>' } })
+	async getBranchesWithCommits(
 		token: string,
 		owner: string,
 		repo: string,
@@ -1216,7 +1296,7 @@ export class GitHubApi implements Disposable {
 		const limit = mode === 'contains' ? 10 : 1;
 
 		try {
-			const query = `query getCommitBranches(
+			const query = `query getBranchesWithCommits(
 	$owner: String!
 	$repo: String!
 	$since: GitTimestamp!
@@ -1326,8 +1406,8 @@ export class GitHubApi implements Disposable {
 		}
 	}
 
-	@debug<GitHubApi['getCommitOnBranch']>({ args: { 0: '<token>' } })
-	async getCommitOnBranch(
+	@debug<GitHubApi['getBranchWithCommit']>({ args: { 0: '<token>' } })
+	async getBranchWithCommit(
 		token: string,
 		owner: string,
 		repo: string,
@@ -1353,7 +1433,7 @@ export class GitHubApi implements Disposable {
 		const limit = mode === 'contains' ? 100 : 1;
 
 		try {
-			const query = `query getCommitOnBranch(
+			const query = `query getBranchWithCommit(
 	$owner: String!
 	$repo: String!
 	$ref: String!
@@ -1756,8 +1836,8 @@ export class GitHubApi implements Disposable {
 		}
 	}
 
-	@debug<GitHubApi['getCommitTags']>({ args: { 0: '<token>' } })
-	async getCommitTags(token: string, owner: string, repo: string, ref: string, date: Date): Promise<string[]> {
+	@debug<GitHubApi['getTagsWithCommit']>({ args: { 0: '<token>' } })
+	async getTagsWithCommit(token: string, owner: string, repo: string, ref: string, date: Date): Promise<string[]> {
 		const scope = getLogScope();
 
 		interface QueryResult {
@@ -1776,7 +1856,7 @@ export class GitHubApi implements Disposable {
 		}
 
 		try {
-			const query = `query getCommitTags(
+			const query = `query getTagsWithCommit(
 	$owner: String!
 	$repo: String!
 	$since: GitTimestamp!
@@ -2933,7 +3013,14 @@ export class GitHubApi implements Disposable {
 	async searchMyIssues(
 		provider: Provider,
 		token: string,
-		options?: { search?: string; user?: string; repos?: string[]; baseUrl?: string; avatarSize?: number },
+		options?: {
+			search?: string;
+			user?: string;
+			repos?: string[];
+			baseUrl?: string;
+			avatarSize?: number;
+			includeBody?: boolean;
+		},
 		cancellation?: CancellationToken,
 	): Promise<SearchedIssue[] | undefined> {
 		const scope = getLogScope();
@@ -2950,6 +3037,14 @@ export class GitHubApi implements Disposable {
 			};
 		}
 
+		const issueFragement = `${gqIssueFragment}${
+			options?.includeBody
+				? `
+			body
+			`
+				: ''
+		}`;
+
 		const query = `query searchMyIssues(
 				$authored: String!
 				$assigned: String!
@@ -2959,21 +3054,21 @@ export class GitHubApi implements Disposable {
 				authored: search(first: 100, query: $authored, type: ISSUE) {
 					nodes {
 						... on Issue {
-							${gqIssueFragment}
+							${issueFragement}
 						}
 					}
 				}
 				assigned: search(first: 100, query: $assigned, type: ISSUE) {
 					nodes {
 						... on Issue {
-							${gqIssueFragment}
+							${issueFragement}
 						}
 					}
 				}
 				mentioned: search(first: 100, query: $mentioned, type: ISSUE) {
 					nodes {
 						... on Issue {
-							${gqIssueFragment}
+							${issueFragement}
 						}
 					}
 				}
@@ -3040,7 +3135,9 @@ export class GitHubApi implements Disposable {
 		const scope = getLogScope();
 
 		interface SearchResult {
-			nodes: GitHubPullRequest[];
+			search: {
+				nodes: GitHubPullRequest[];
+			};
 		}
 
 		try {
@@ -3048,7 +3145,7 @@ export class GitHubApi implements Disposable {
 	$searchQuery: String!
 	$avatarSize: Int
 ) {
-	search(first: 100, query: $searchQuery, type: ISSUE) {
+	search(first: 10, query: $searchQuery, type: ISSUE) {
 		nodes {
 			...on PullRequest {
 				${gqlPullRequestFragment}
@@ -3082,7 +3179,7 @@ export class GitHubApi implements Disposable {
 			);
 			if (rsp == null) return [];
 
-			const results = rsp.nodes.map(pr => fromGitHubPullRequest(pr, provider));
+			const results = rsp.search.nodes.map(pr => fromGitHubPullRequest(pr, provider));
 			return results;
 		} catch (ex) {
 			throw this.handleException(ex, provider, scope);

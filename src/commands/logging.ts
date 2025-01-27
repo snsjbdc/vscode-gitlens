@@ -1,13 +1,13 @@
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
-import { command } from '../system/vscode/command';
-import { configuration } from '../system/vscode/configuration';
-import { Command } from './base';
+import { command } from '../system/-webview/command';
+import { configuration } from '../system/-webview/configuration';
+import { GlCommandBase } from './commandBase';
 
 @command()
-export class EnableDebugLoggingCommand extends Command {
+export class EnableDebugLoggingCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super(Commands.EnableDebugLogging);
+		super(GlCommand.EnableDebugLogging);
 	}
 
 	async execute() {
@@ -16,9 +16,9 @@ export class EnableDebugLoggingCommand extends Command {
 }
 
 @command()
-export class DisableDebugLoggingCommand extends Command {
+export class DisableDebugLoggingCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super(Commands.DisableDebugLogging);
+		super(GlCommand.DisableDebugLogging);
 	}
 
 	async execute() {

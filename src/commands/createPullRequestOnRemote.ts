@@ -1,14 +1,14 @@
 import { window } from 'vscode';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
-import { getRemoteNameFromBranchName } from '../git/models/branch';
 import type { GitRemote } from '../git/models/remote';
 import type { RemoteResource } from '../git/models/remoteResource';
 import { RemoteResourceType } from '../git/models/remoteResource';
 import type { RemoteProvider } from '../git/remotes/remoteProvider';
+import { getRemoteNameFromBranchName } from '../git/utils/branch.utils';
 import { getRepositoryOrShowPicker } from '../quickpicks/repositoryPicker';
-import { command, executeCommand } from '../system/vscode/command';
-import { Command } from './base';
+import { command, executeCommand } from '../system/-webview/command';
+import { GlCommandBase } from './commandBase';
 import type { OpenOnRemoteCommandArgs } from './openOnRemote';
 
 export interface CreatePullRequestOnRemoteCommandArgs {
@@ -21,9 +21,9 @@ export interface CreatePullRequestOnRemoteCommandArgs {
 }
 
 @command()
-export class CreatePullRequestOnRemoteCommand extends Command {
+export class CreatePullRequestOnRemoteCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super(Commands.CreatePullRequestOnRemote);
+		super(GlCommand.CreatePullRequestOnRemote);
 	}
 
 	async execute(args?: CreatePullRequestOnRemoteCommandArgs) {
@@ -35,7 +35,7 @@ export class CreatePullRequestOnRemoteCommand extends Command {
 		if (repo == null) return;
 
 		if (args == null) {
-			const branch = await repo.git.getBranch();
+			const branch = await repo.git.branches().getBranch();
 			if (branch?.upstream == null) {
 				void window.showErrorMessage(
 					`Unable to create a pull request for branch \`${branch?.name}\` because it has no upstream branch`,
@@ -51,11 +51,11 @@ export class CreatePullRequestOnRemoteCommand extends Command {
 			};
 		}
 
-		const compareRemote = await repo.git.getRemote(args.remote);
+		const compareRemote = await repo.git.remotes().getRemote(args.remote);
 		if (compareRemote?.provider == null) return;
 
 		const providerId = compareRemote.provider.id;
-		const remotes = (await repo.git.getRemotes({
+		const remotes = (await repo.git.remotes().getRemotes({
 			filter: r => r.provider?.id === providerId,
 			sort: true,
 		})) as GitRemote<RemoteProvider>[];
@@ -72,7 +72,7 @@ export class CreatePullRequestOnRemoteCommand extends Command {
 			},
 		};
 
-		void (await executeCommand<OpenOnRemoteCommandArgs>(Commands.OpenOnRemote, {
+		void (await executeCommand<OpenOnRemoteCommandArgs>(GlCommand.OpenOnRemote, {
 			resource: resource,
 			remotes: remotes,
 		}));

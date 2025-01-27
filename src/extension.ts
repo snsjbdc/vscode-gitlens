@@ -1,34 +1,36 @@
-import { hrtime } from '@env/hrtime';
-import { isWeb } from '@env/platform';
 import type { ExtensionContext } from 'vscode';
 import { version as codeVersion, env, ExtensionMode, Uri, window, workspace } from 'vscode';
+import { hrtime } from '@env/hrtime';
+import { isWeb } from '@env/platform';
 import { Api } from './api/api';
 import type { CreatePullRequestActionContext, GitLensApi, OpenPullRequestActionContext } from './api/gitlens';
 import type { CreatePullRequestOnRemoteCommandArgs } from './commands/createPullRequestOnRemote';
 import type { OpenPullRequestOnRemoteCommandArgs } from './commands/openPullRequestOnRemote';
 import { fromOutputLevel } from './config';
 import { trackableSchemes } from './constants';
-import { Commands } from './constants.commands';
+import { GlCommand } from './constants.commands';
 import { SyncedStorageKeys } from './constants.storage';
 import { Container } from './container';
 import { isGitUri } from './git/gitUri';
-import { getBranchNameWithoutRemote, isBranch } from './git/models/branch';
+import { isBranch } from './git/models/branch';
 import { isCommit } from './git/models/commit';
 import { isRepository } from './git/models/repository';
 import { isTag } from './git/models/tag';
+import { getBranchNameWithoutRemote } from './git/utils/branch.utils';
+import { setAbbreviatedShaLength } from './git/utils/revision.utils';
 import { showDebugLoggingWarningMessage, showPreReleaseExpiredErrorMessage, showWhatsNewMessage } from './messages';
 import { registerPartnerActionRunners } from './partners';
+import { executeCommand, registerCommands } from './system/-webview/command';
+import { configuration, Configuration } from './system/-webview/configuration';
+import { setContext } from './system/-webview/context';
+import { Storage } from './system/-webview/storage';
+import { isTextDocument, isTextEditor, isWorkspaceFolder } from './system/-webview/vscode';
 import { setDefaultDateLocales } from './system/date';
 import { once } from './system/event';
 import { BufferedLogChannel, getLoggableName, Logger } from './system/logger';
 import { flatten } from './system/object';
 import { Stopwatch } from './system/stopwatch';
 import { compare, fromString, satisfies } from './system/version';
-import { executeCommand, registerCommands } from './system/vscode/command';
-import { configuration, Configuration } from './system/vscode/configuration';
-import { setContext } from './system/vscode/context';
-import { Storage } from './system/vscode/storage';
-import { isTextDocument, isTextEditor, isWorkspaceFolder } from './system/vscode/utils';
 import { isViewNode } from './views/nodes/abstract/viewNode';
 import './commands';
 
@@ -56,7 +58,7 @@ export async function activate(context: ExtensionContext): Promise<GitLensApi | 
 						})`,
 					);
 					channel.appendLine(
-						'To enable debug logging, set `"gitlens.outputLevel: "debug"` or run "GitLens: Enable Debug Logging" from the Command Palette',
+						'To enable debug logging, set `"gitlens.outputLevel": "debug"` or run "GitLens: Enable Debug Logging" from the Command Palette',
 					);
 				}
 				return channel;
@@ -147,15 +149,16 @@ export async function activate(context: ExtensionContext): Promise<GitLensApi | 
 		previousVersion = localVersion;
 	}
 
-	let exitMessage;
-	if (Logger.enabled('debug')) {
-		exitMessage = `syncedVersion=${syncedVersion}, localVersion=${localVersion}, previousVersion=${previousVersion}, welcome=${storage.get(
-			'views:welcome:visible',
-		)}`;
+	// If there is no local or synced previous version, this is a new install
+	if (localVersion == null || previousVersion == null) {
+		void setContext('gitlens:install:new', true);
+	} else if (gitlensVersion !== previousVersion && compare(gitlensVersion, previousVersion) === 1) {
+		void setContext('gitlens:install:upgradedFrom', previousVersion);
 	}
 
-	if (previousVersion == null) {
-		void storage.store('views:welcome:visible', true);
+	let exitMessage;
+	if (Logger.enabled('debug')) {
+		exitMessage = `syncedVersion=${syncedVersion}, localVersion=${localVersion}, previousVersion=${previousVersion}`;
 	}
 
 	Configuration.configure(context);
@@ -165,6 +168,10 @@ export async function activate(context: ExtensionContext): Promise<GitLensApi | 
 		configuration.onDidChange(e => {
 			if (configuration.changed(e, 'defaultDateLocale')) {
 				setDefaultDateLocales(configuration.get('defaultDateLocale') ?? env.language);
+			}
+
+			if (configuration.changed(e, 'advanced.abbreviatedShaLength')) {
+				setAbbreviatedShaLength(configuration.get('advanced.abbreviatedShaLength'));
 			}
 		}),
 	);
@@ -186,13 +193,13 @@ export async function activate(context: ExtensionContext): Promise<GitLensApi | 
 			);
 		}
 
-		void showWelcomeOrWhatsNew(container, gitlensVersion, prerelease, previousVersion);
+		void showWhatsNew(container, gitlensVersion, prerelease, previousVersion);
 
-		void storage.store(prerelease ? 'preVersion' : 'version', gitlensVersion);
+		void storage.store(prerelease ? 'preVersion' : 'version', gitlensVersion).catch();
 
 		// Only update our synced version if the new version is greater
 		if (syncedVersion == null || compare(gitlensVersion, syncedVersion) === 1) {
-			void storage.store(prerelease ? 'synced:preVersion' : 'synced:version', gitlensVersion);
+			void storage.store(prerelease ? 'synced:preVersion' : 'synced:version', gitlensVersion).catch();
 		}
 
 		if (logLevel === 'debug') {
@@ -201,7 +208,7 @@ export async function activate(context: ExtensionContext): Promise<GitLensApi | 
 
 				if (!container.prereleaseOrDebugging) {
 					if (await showDebugLoggingWarningMessage()) {
-						void executeCommand(Commands.DisableDebugLogging);
+						void executeCommand(GlCommand.DisableDebugLogging);
 					}
 				}
 			}, 60000);
@@ -281,7 +288,7 @@ export function deactivate() {
 // }
 
 function setKeysForSync(context: ExtensionContext, ...keys: (SyncedStorageKeys | string)[]) {
-	context.globalState?.setKeysForSync([...keys, SyncedStorageKeys.Version, SyncedStorageKeys.HomeViewWelcomeVisible]);
+	context.globalState?.setKeysForSync([...keys, SyncedStorageKeys.Version, SyncedStorageKeys.PreReleaseVersion]);
 }
 
 function registerBuiltInActionRunners(container: Container): void {
@@ -291,7 +298,7 @@ function registerBuiltInActionRunners(container: Container): void {
 			run: async ctx => {
 				if (ctx.type !== 'createPullRequest') return;
 
-				void (await executeCommand<CreatePullRequestOnRemoteCommandArgs>(Commands.CreatePullRequestOnRemote, {
+				void (await executeCommand<CreatePullRequestOnRemoteCommandArgs>(GlCommand.CreatePullRequestOnRemote, {
 					base: undefined,
 					compare: ctx.branch.isRemote
 						? getBranchNameWithoutRemote(ctx.branch.name)
@@ -308,7 +315,7 @@ function registerBuiltInActionRunners(container: Container): void {
 			run: async ctx => {
 				if (ctx.type !== 'openPullRequest') return;
 
-				void (await executeCommand<OpenPullRequestOnRemoteCommandArgs>(Commands.OpenPullRequestOnRemote, {
+				void (await executeCommand<OpenPullRequestOnRemoteCommandArgs>(GlCommand.OpenPullRequestOnRemote, {
 					pr: { url: ctx.pullRequest.url },
 				}));
 			},
@@ -316,7 +323,7 @@ function registerBuiltInActionRunners(container: Container): void {
 	);
 }
 
-async function showWelcomeOrWhatsNew(
+async function showWhatsNew(
 	container: Container,
 	version: string,
 	prerelease: boolean,
@@ -324,30 +331,6 @@ async function showWelcomeOrWhatsNew(
 ) {
 	if (previousVersion == null) {
 		Logger.log(`GitLens first-time install; window.focused=${window.state.focused}`);
-
-		if (configuration.get('showWelcomeOnInstall') === false) return;
-
-		if (window.state.focused) {
-			await container.storage.delete('pendingWelcomeOnFocus');
-			await executeCommand(Commands.ShowWelcomePage);
-		} else {
-			// Save pending on window getting focus
-			await container.storage.store('pendingWelcomeOnFocus', true);
-			const disposable = window.onDidChangeWindowState(e => {
-				if (!e.focused) return;
-
-				disposable.dispose();
-
-				// If the window is now focused and we are pending the welcome, clear the pending state and show the welcome
-				if (container.storage.get('pendingWelcomeOnFocus') === true) {
-					void container.storage.delete('pendingWelcomeOnFocus');
-					if (configuration.get('showWelcomeOnInstall')) {
-						void executeCommand(Commands.ShowWelcomePage);
-					}
-				}
-			});
-			container.context.subscriptions.push(disposable);
-		}
 
 		return;
 	}

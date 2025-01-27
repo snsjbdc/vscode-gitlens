@@ -3,16 +3,16 @@ import { Disposable, TreeItem, TreeItemCollapsibleState, window } from 'vscode';
 import type { OpenWalkthroughCommandArgs } from '../commands/walkthroughs';
 import type { DraftsViewConfig } from '../config';
 import { previewBadge } from '../constants';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { AuthenticationRequiredError } from '../errors';
 import { unknownGitUri } from '../git/gitUri';
-import type { Draft } from '../gk/models/drafts';
-import { ensurePlusFeaturesEnabled } from '../plus/gk/utils';
-import { gate } from '../system/decorators/gate';
+import type { Draft } from '../plus/drafts/models/drafts';
+import { ensurePlusFeaturesEnabled } from '../plus/gk/utils/-webview/plus.utils';
+import { executeCommand } from '../system/-webview/command';
+import { configuration } from '../system/-webview/configuration';
+import { gate } from '../system/decorators/-webview/gate';
 import { groupByFilterMap } from '../system/iterable';
-import { executeCommand } from '../system/vscode/command';
-import { configuration } from '../system/vscode/configuration';
 import { CacheableChildrenViewNode } from './nodes/abstract/cacheableChildrenViewNode';
 import { DraftNode } from './nodes/draftNode';
 import { GroupingNode } from './nodes/groupingNode';
@@ -115,14 +115,12 @@ export class DraftsView extends ViewBase<'drafts', DraftsViewNode, DraftsViewCon
 	}
 
 	protected registerCommands(): Disposable[] {
-		void this.container.viewCommands;
-
 		return [
 			registerViewCommand(
 				this.getQualifiedCommand('info'),
 				() =>
-					executeCommand<OpenWalkthroughCommandArgs>(Commands.OpenWalkthrough, {
-						step: 'code-collab',
+					executeCommand<OpenWalkthroughCommandArgs>(GlCommand.OpenWalkthrough, {
+						step: 'streamline-collaboration',
 						source: 'cloud-patches',
 						detail: 'info',
 					}),
@@ -130,14 +128,14 @@ export class DraftsView extends ViewBase<'drafts', DraftsViewNode, DraftsViewCon
 			),
 			registerViewCommand(
 				this.getQualifiedCommand('copy'),
-				() => executeCommand(Commands.ViewsCopy, this.activeSelection, this.selection),
+				() => executeCommand(GlCommand.ViewsCopy, this.activeSelection, this.selection),
 				this,
 			),
 			registerViewCommand(this.getQualifiedCommand('refresh'), () => this.refresh(true), this),
 			registerViewCommand(
 				this.getQualifiedCommand('create'),
 				async () => {
-					await executeCommand(Commands.CreateCloudPatch);
+					await executeCommand(GlCommand.CreateCloudPatch);
 					void this.ensureRoot().triggerChange(true);
 				},
 				this,

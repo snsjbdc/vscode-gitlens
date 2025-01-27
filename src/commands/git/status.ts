@@ -1,8 +1,8 @@
 import { GlyphChars } from '../../constants';
 import type { Container } from '../../container';
-import { createReference, getReferenceLabel } from '../../git/models/reference';
 import type { Repository } from '../../git/models/repository';
 import type { GitStatus } from '../../git/models/status';
+import { createReference, getReferenceLabel } from '../../git/utils/reference.utils';
 import { CommandQuickPickItem } from '../../quickpicks/items/common';
 import { GitWizardQuickPickItem } from '../../quickpicks/items/gitWizard';
 import { pad } from '../../system/string';
@@ -54,7 +54,7 @@ export class StatusGitCommand extends QuickCommand<State> {
 	protected async *steps(state: PartialStepState<State>): StepGenerator {
 		const context: Context = {
 			repos: this.container.git.openRepositories,
-			associatedView: this.container.commitsView,
+			associatedView: this.container.views.commits,
 			status: undefined!,
 			title: this.title,
 		};
@@ -82,7 +82,7 @@ export class StatusGitCommand extends QuickCommand<State> {
 				}
 			}
 
-			context.status = (await state.repo.git.getStatus())!;
+			context.status = (await state.repo.git.status().getStatus())!;
 			if (context.status == null) return;
 
 			context.title = `${this.title}${pad(GlyphChars.Dot, 2, 2)}${getReferenceLabel(

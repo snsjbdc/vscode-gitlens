@@ -1,7 +1,8 @@
-import { Container } from '../../container';
+/* eslint-disable @typescript-eslint/no-restricted-imports */ /* TODO need to deal with sharing rich class shapes to webviews */
+import type { Container } from '../../container';
 import { formatDate, fromNow } from '../../system/date';
-import { memoize } from '../../system/decorators/memoize';
-import { shortenRevision } from './reference';
+import { memoize } from '../../system/decorators/-webview/memoize';
+import { shortenRevision } from '../utils/revision.utils';
 
 export interface GitReflog {
 	readonly repoPath: string;
@@ -18,6 +19,7 @@ export class GitReflogRecord {
 	private _previousSha: string | undefined;
 
 	constructor(
+		private readonly container: Container,
 		public readonly repoPath: string,
 		public readonly sha: string,
 		private _selector: string,
@@ -37,8 +39,8 @@ export class GitReflogRecord {
 	}
 
 	get formattedDate(): string {
-		return Container.instance.CommitDateFormatting.dateStyle === 'absolute'
-			? this.formatDate(Container.instance.CommitDateFormatting.dateFormat)
+		return this.container.CommitDateFormatting.dateStyle === 'absolute'
+			? this.formatDate(this.container.CommitDateFormatting.dateFormat)
 			: this.formatDateFromNow();
 	}
 

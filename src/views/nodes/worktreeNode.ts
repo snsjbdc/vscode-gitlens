@@ -3,20 +3,21 @@ import type { IconPath } from '../../@types/vscode.iconpath';
 import { GlyphChars } from '../../constants';
 import type { GitUri } from '../../git/gitUri';
 import type { GitBranch } from '../../git/models/branch';
+import { isStash } from '../../git/models/commit';
 import type { GitLog } from '../../git/models/log';
 import type { PullRequest, PullRequestState } from '../../git/models/pullRequest';
-import { shortenRevision } from '../../git/models/reference';
-import { getHighlanderProviderName } from '../../git/models/remote';
 import type { GitStatus } from '../../git/models/status';
 import type { GitWorktree } from '../../git/models/worktree';
-import { getBranchIconPath } from '../../git/utils/branch-utils';
-import { gate } from '../../system/decorators/gate';
+import { getBranchIconPath } from '../../git/utils/-webview/icons';
+import { getHighlanderProviderName } from '../../git/utils/remote.utils';
+import { shortenRevision } from '../../git/utils/revision.utils';
+import { getContext } from '../../system/-webview/context';
+import { gate } from '../../system/decorators/-webview/gate';
 import { debug } from '../../system/decorators/log';
 import { map } from '../../system/iterable';
 import type { Deferred } from '../../system/promise';
 import { defer, getSettledValue } from '../../system/promise';
 import { pad } from '../../system/string';
-import { getContext } from '../../system/vscode/context';
 import type { ViewsWithWorktrees } from '../viewBase';
 import { createViewDecorationUri } from '../viewDecorationProvider';
 import { CacheableChildrenViewNode } from './abstract/cacheableChildrenViewNode';
@@ -27,6 +28,7 @@ import { LoadMoreNode, MessageNode } from './common';
 import { CompareBranchNode } from './compareBranchNode';
 import { insertDateMarkers } from './helpers';
 import { PullRequestNode } from './pullRequestNode';
+import { StashNode } from './stashNode';
 import { UncommittedFilesNode } from './UncommittedFilesNode';
 
 type State = {
@@ -119,16 +121,17 @@ export class WorktreeNode extends CacheableChildrenViewNode<'worktree', ViewsWit
 
 			const [logResult, getBranchAndTagTipsResult, unpublishedCommitsResult] = await Promise.allSettled([
 				this.getLog(),
-				this.view.container.git.getBranchesAndTagsTipsFn(this.uri.repoPath),
+				this.view.container.git.getBranchesAndTagsTipsLookup(this.uri.repoPath),
 				branch != null && !branch.remote
-					? this.view.container.git.getBranchAheadRange(branch).then(range =>
-							range
-								? this.view.container.git.getLogRefsOnly(this.uri.repoPath!, {
-										limit: 0,
-										ref: range,
-								  })
-								: undefined,
-					  )
+					? this.view.container.git
+							.getBranchAheadRange(branch)
+							.then(range =>
+								range
+									? this.view.container.git
+											.commits(this.uri.repoPath!)
+											.getLogShasOnly(range, { limit: 0 })
+									: undefined,
+							)
 					: undefined,
 			]);
 			const log = getSettledValue(logResult);
@@ -158,17 +161,17 @@ export class WorktreeNode extends CacheableChildrenViewNode<'worktree', ViewsWit
 
 			children.push(
 				...insertDateMarkers(
-					map(
-						log.commits.values(),
-						c =>
-							new CommitNode(
-								this.view,
-								this,
-								c,
-								unpublishedCommits?.has(c.ref),
-								branch,
-								getBranchAndTagTips,
-							),
+					map(log.commits.values(), c =>
+						isStash(c)
+							? new StashNode(this.view, this, c, { icon: true })
+							: new CommitNode(
+									this.view,
+									this,
+									c,
+									unpublishedCommits?.has(c.ref),
+									branch,
+									getBranchAndTagTips,
+							  ),
 					),
 					this,
 				),
@@ -291,7 +294,7 @@ export class WorktreeNode extends CacheableChildrenViewNode<'worktree', ViewsWit
 							);
 						} else {
 							const providerName = getHighlanderProviderName(
-								await this.view.container.git.getRemotesWithProviders(branch.repoPath),
+								await this.view.container.git.remotes(branch.repoPath).getRemotesWithProviders(),
 							);
 
 							tooltip.appendMarkdown(
@@ -400,9 +403,9 @@ export class WorktreeNode extends CacheableChildrenViewNode<'worktree', ViewsWit
 	private _log: GitLog | undefined;
 	private async getLog() {
 		if (this._log == null) {
-			this._log = await this.view.container.git.getLog(this.uri.repoPath!, {
-				ref: this.worktree.sha,
+			this._log = await this.view.container.git.commits(this.uri.repoPath!).getLog(this.worktree.sha, {
 				limit: this.limit ?? this.view.config.defaultItemLimit,
+				stashes: this.view.config.showStashes,
 			});
 		}
 

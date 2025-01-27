@@ -63,7 +63,7 @@ export async function getAheadBehindFilesQuery(
 				stats = {
 					additions: stats.additions + workingStats.additions,
 					deletions: stats.deletions + workingStats.deletions,
-					changedFiles: files.length,
+					files: files.length,
 					approximated: true,
 				};
 			}
@@ -84,11 +84,7 @@ export function getCommitsQuery(
 	filterByAuthors?: GitUser[] | undefined,
 ): (limit: number | undefined) => Promise<CommitsQueryResults> {
 	return async (limit: number | undefined) => {
-		const log = await container.git.getLog(repoPath, {
-			limit: limit,
-			ref: range,
-			authors: filterByAuthors,
-		});
+		const log = await container.git.commits(repoPath).getLog(range, { limit: limit, authors: filterByAuthors });
 
 		const results: Mutable<CommitsQueryResults> = {
 			log: log,

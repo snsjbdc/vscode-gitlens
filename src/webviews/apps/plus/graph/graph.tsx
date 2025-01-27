@@ -5,6 +5,10 @@ import { render, unmountComponentAtNode } from 'react-dom';
 import type { GraphBranchesVisibility } from '../../../../config';
 import type { SearchQuery } from '../../../../constants.search';
 import type { GitGraphRowType } from '../../../../git/models/graph';
+import { Color, getCssVariable, mix, opacity } from '../../../../system/color';
+import { debug, log } from '../../../../system/decorators/log';
+import { debounce } from '../../../../system/function';
+import { getLogScope, setLogScopeExit } from '../../../../system/logger.scope';
 import type {
 	DidSearchParams,
 	GraphAvatars,
@@ -18,7 +22,7 @@ import type {
 	State,
 	UpdateGraphConfigurationParams,
 	UpdateStateCallback,
-} from '../../../../plus/webviews/graph/protocol';
+} from '../../../plus/graph/protocol';
 import {
 	ChooseRefRequest,
 	ChooseRepositoryCommand,
@@ -38,6 +42,7 @@ import {
 	DidChangeWorkingTreeNotification,
 	DidFetchNotification,
 	DidSearchNotification,
+	DidStartFeaturePreviewNotification,
 	DoubleClickedCommandType,
 	EnsureRowRequest,
 	GetMissingAvatarsCommand,
@@ -54,11 +59,7 @@ import {
 	UpdateIncludedRefsCommand,
 	UpdateRefsVisibilityCommand,
 	UpdateSelectionCommand,
-} from '../../../../plus/webviews/graph/protocol';
-import { Color, getCssVariable, mix, opacity } from '../../../../system/color';
-import { debug, log } from '../../../../system/decorators/log';
-import { debounce } from '../../../../system/function';
-import { getLogScope, setLogScopeExit } from '../../../../system/logger.scope';
+} from '../../../plus/graph/protocol';
 import type { IpcMessage, IpcNotification } from '../../../protocol';
 import { DidChangeHostWindowFocusNotification } from '../../../protocol';
 import { App } from '../../shared/appBase';
@@ -165,7 +166,11 @@ export class GraphApp extends App<State> {
 				this.state.avatars = msg.params.avatars;
 				this.setState(this.state, DidChangeAvatarsNotification);
 				break;
-
+			case DidStartFeaturePreviewNotification.is(msg):
+				this.state.featurePreview = msg.params.featurePreview;
+				this.state.allowed = msg.params.allowed;
+				this.setState(this.state, DidStartFeaturePreviewNotification);
+				break;
 			case DidChangeBranchStateNotification.is(msg):
 				this.state.branchState = msg.params.branchState;
 				this.setState(this.state, DidChangeBranchStateNotification);

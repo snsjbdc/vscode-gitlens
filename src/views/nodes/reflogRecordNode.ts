@@ -3,7 +3,7 @@ import { GlyphChars } from '../../constants';
 import { GitUri } from '../../git/gitUri';
 import type { GitLog } from '../../git/models/log';
 import type { GitReflogRecord } from '../../git/models/reflog';
-import { gate } from '../../system/decorators/gate';
+import { gate } from '../../system/decorators/-webview/gate';
 import { debug } from '../../system/decorators/log';
 import { map } from '../../system/iterable';
 import type { ViewsWithCommits } from '../viewBase';
@@ -80,10 +80,9 @@ export class ReflogRecordNode extends ViewNode<'reflog-record', ViewsWithCommits
 	private async getLog() {
 		if (this._log === undefined) {
 			const range = `${this.record.previousSha}..${this.record.sha}`;
-			this._log = await this.view.container.git.getLog(this.uri.repoPath!, {
-				limit: this.limit ?? this.view.config.defaultItemLimit,
-				ref: range,
-			});
+			this._log = await this.view.container.git
+				.commits(this.uri.repoPath!)
+				.getLog(range, { limit: this.limit ?? this.view.config.defaultItemLimit });
 		}
 
 		return this._log;

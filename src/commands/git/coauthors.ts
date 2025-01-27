@@ -1,8 +1,8 @@
 import type { Container } from '../../container';
 import type { GitContributor } from '../../git/models/contributor';
 import type { Repository } from '../../git/models/repository';
+import { executeCoreCommand } from '../../system/-webview/command';
 import { normalizePath } from '../../system/path';
-import { executeCoreCommand } from '../../system/vscode/command';
 import type { ViewsWithRepositoryFolders } from '../../views/viewBase';
 import type { PartialStepState, StepGenerator, StepState } from '../quickCommand';
 import { endSteps, QuickCommand, StepResultBreak } from '../quickCommand';
@@ -92,7 +92,7 @@ export class CoAuthorsGitCommand extends QuickCommand<State> {
 		const context: Context = {
 			repos: this.container.git.openRepositories,
 			activeRepo: undefined,
-			associatedView: this.container.contributorsView,
+			associatedView: this.container.views.contributors,
 			title: this.title,
 		};
 

@@ -2,17 +2,18 @@ import type { CancellationToken, ConfigurationChangeEvent, Disposable } from 'vs
 import { ProgressLocation, TreeItem, TreeItemCollapsibleState, window } from 'vscode';
 import type { ViewFilesLayout, WorktreesViewConfig } from '../config';
 import { proBadge } from '../constants';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { PlusFeatures } from '../features';
 import { GitUri } from '../git/gitUri';
 import type { RepositoryChangeEvent } from '../git/models/repository';
-import { groupRepositories, RepositoryChange, RepositoryChangeComparisonMode } from '../git/models/repository';
+import { RepositoryChange, RepositoryChangeComparisonMode } from '../git/models/repository';
 import type { GitWorktree } from '../git/models/worktree';
-import { ensurePlusFeaturesEnabled } from '../plus/gk/utils';
-import { gate } from '../system/decorators/gate';
-import { executeCommand } from '../system/vscode/command';
-import { configuration } from '../system/vscode/configuration';
+import { groupRepositories } from '../git/utils/-webview/repository.utils';
+import { ensurePlusFeaturesEnabled } from '../plus/gk/utils/-webview/plus.utils';
+import { executeCommand } from '../system/-webview/command';
+import { configuration } from '../system/-webview/configuration';
+import { gate } from '../system/decorators/-webview/gate';
 import { RepositoriesSubscribeableNode } from './nodes/abstract/repositoriesSubscribeableNode';
 import { RepositoryFolderNode } from './nodes/abstract/repositoryFolderNode';
 import type { ViewNode } from './nodes/abstract/viewNode';
@@ -31,8 +32,17 @@ export class WorktreesRepositoryNode extends RepositoryFolderNode<WorktreesView,
 	}
 
 	protected changed(e: RepositoryChangeEvent) {
+		if (this.view.config.showStashes && e.changed(RepositoryChange.Stash, RepositoryChangeComparisonMode.Any)) {
+			return true;
+		}
+
 		return e.changed(
 			RepositoryChange.Config,
+			RepositoryChange.Heads,
+			RepositoryChange.Index,
+			RepositoryChange.Remotes,
+			RepositoryChange.RemoteProviders,
+			RepositoryChange.PausedOperationStatus,
 			RepositoryChange.Worktrees,
 			RepositoryChange.Unknown,
 			RepositoryChangeComparisonMode.Any,
@@ -42,25 +52,28 @@ export class WorktreesRepositoryNode extends RepositoryFolderNode<WorktreesView,
 
 export class WorktreesViewNode extends RepositoriesSubscribeableNode<WorktreesView, WorktreesRepositoryNode> {
 	async getChildren(): Promise<ViewNode[]> {
-		const access = await this.view.container.git.access(PlusFeatures.Worktrees);
-		if (access.allowed === false) return [];
+		this.view.description = this.view.getViewDescription();
+		this.view.message = undefined;
 
 		if (this.children == null) {
+			const access = await this.view.container.git.access(PlusFeatures.Worktrees);
+			if (access.allowed === false) return [];
+
+			if (this.view.container.git.isDiscoveringRepositories) {
+				this.view.message = 'Loading worktrees...';
+				await this.view.container.git.isDiscoveringRepositories;
+			}
+
 			let repositories = this.view.container.git.openRepositories;
+			if (repositories.length === 0) {
+				this.view.message = 'No worktrees could be found.';
+				return [];
+			}
+
 			if (configuration.get('views.collapseWorktreesWhenPossible')) {
 				const grouped = await groupRepositories(repositories);
 				repositories = [...grouped.keys()];
 			}
-
-			if (repositories.length === 0) {
-				this.view.message = this.view.container.git.isDiscoveringRepositories
-					? 'Loading worktrees...'
-					: 'No worktrees could be found.';
-
-				return [];
-			}
-
-			this.view.message = undefined;
 
 			const splat = repositories.length === 1;
 			this.children = repositories.map(
@@ -71,23 +84,17 @@ export class WorktreesViewNode extends RepositoriesSubscribeableNode<WorktreesVi
 		if (this.children.length === 1) {
 			const [child] = this.children;
 
-			const children = await child.getChildren();
-			if (children.length <= 1) {
-				this.view.message = undefined;
-				this.view.title = 'Worktrees';
-
+			const grandChildren = await child.getChildren();
+			if (grandChildren.length <= 1) {
 				void child.ensureSubscription();
 
 				return [];
 			}
 
-			this.view.message = undefined;
-			this.view.title = `Worktrees (${children.length})`;
+			this.view.description = this.view.getViewDescription(grandChildren.length);
 
-			return children;
+			return grandChildren;
 		}
-
-		this.view.title = 'Worktrees';
 
 		return this.children;
 	}
@@ -101,10 +108,13 @@ export class WorktreesViewNode extends RepositoriesSubscribeableNode<WorktreesVi
 export class WorktreesView extends ViewBase<'worktrees', WorktreesViewNode, WorktreesViewConfig> {
 	protected readonly configKey = 'worktrees';
 
-	constructor(container: Container) {
-		super(container, 'worktrees', 'Worktrees', 'worktreesView');
+	constructor(container: Container, grouped?: boolean) {
+		super(container, 'worktrees', 'Worktrees', 'worktreesView', grouped);
+	}
 
-		this.description = proBadge;
+	override getViewDescription(count?: number): string {
+		const description = super.getViewDescription(count);
+		return description ? `${description} \u00a0\u2022\u00a0 ${proBadge}` : proBadge;
 	}
 
 	override get canReveal(): boolean {
@@ -125,12 +135,10 @@ export class WorktreesView extends ViewBase<'worktrees', WorktreesViewNode, Work
 	}
 
 	protected registerCommands(): Disposable[] {
-		void this.container.viewCommands;
-
 		return [
 			registerViewCommand(
 				this.getQualifiedCommand('copy'),
-				() => executeCommand(Commands.ViewsCopy, this.activeSelection, this.selection),
+				() => executeCommand(GlCommand.ViewsCopy, this.activeSelection, this.selection),
 				this,
 			),
 			registerViewCommand(
@@ -179,6 +187,8 @@ export class WorktreesView extends ViewBase<'worktrees', WorktreesViewNode, Work
 				() => this.setShowBranchPullRequest(false),
 				this,
 			),
+			registerViewCommand(this.getQualifiedCommand('setShowStashesOn'), () => this.setShowStashes(true), this),
+			registerViewCommand(this.getQualifiedCommand('setShowStashesOff'), () => this.setShowStashes(false), this),
 		];
 	}
 
@@ -283,5 +293,9 @@ export class WorktreesView extends ViewBase<'worktrees', WorktreesViewNode, Work
 	private async setShowBranchPullRequest(enabled: boolean) {
 		await configuration.updateEffective(`views.${this.configKey}.pullRequests.showForBranches` as const, enabled);
 		await configuration.updateEffective(`views.${this.configKey}.pullRequests.enabled` as const, enabled);
+	}
+
+	private setShowStashes(enabled: boolean) {
+		return configuration.updateEffective(`views.${this.configKey}.showStashes` as const, enabled);
 	}
 }

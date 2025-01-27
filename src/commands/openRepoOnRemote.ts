@@ -1,14 +1,16 @@
 import type { TextEditor, Uri } from 'vscode';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { GitUri } from '../git/gitUri';
 import { RemoteResourceType } from '../git/models/remoteResource';
 import { showGenericErrorMessage } from '../messages';
 import { getBestRepositoryOrShowPicker } from '../quickpicks/repositoryPicker';
+import { command, executeCommand } from '../system/-webview/command';
 import { Logger } from '../system/logger';
-import { command, executeCommand } from '../system/vscode/command';
-import type { CommandContext } from './base';
-import { ActiveEditorCommand, getCommandUri, isCommandContextViewNodeHasRemote } from './base';
+import { ActiveEditorCommand } from './commandBase';
+import { getCommandUri } from './commandBase.utils';
+import type { CommandContext } from './commandContext';
+import { isCommandContextViewNodeHasRemote } from './commandContext.utils';
 import type { OpenOnRemoteCommandArgs } from './openOnRemote';
 
 export interface OpenRepoOnRemoteCommandArgs {
@@ -19,7 +21,7 @@ export interface OpenRepoOnRemoteCommandArgs {
 @command()
 export class OpenRepoOnRemoteCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super([Commands.OpenRepoOnRemote, Commands.Deprecated_OpenRepoInRemote, Commands.CopyRemoteRepositoryUrl]);
+		super([GlCommand.OpenRepoOnRemote, GlCommand.Deprecated_OpenRepoInRemote, GlCommand.CopyRemoteRepositoryUrl]);
 	}
 
 	protected override preExecute(context: CommandContext, args?: OpenRepoOnRemoteCommandArgs) {
@@ -27,7 +29,7 @@ export class OpenRepoOnRemoteCommand extends ActiveEditorCommand {
 			args = { ...args, remote: context.node.remote.name };
 		}
 
-		if (context.command === Commands.CopyRemoteRepositoryUrl) {
+		if (context.command === GlCommand.CopyRemoteRepositoryUrl) {
 			args = { ...args, clipboard: true };
 		}
 
@@ -51,7 +53,7 @@ export class OpenRepoOnRemoteCommand extends ActiveEditorCommand {
 		if (!repoPath) return;
 
 		try {
-			void (await executeCommand<OpenOnRemoteCommandArgs>(Commands.OpenOnRemote, {
+			void (await executeCommand<OpenOnRemoteCommandArgs>(GlCommand.OpenOnRemote, {
 				resource: {
 					type: RemoteResourceType.Repo,
 				},

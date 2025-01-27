@@ -1,11 +1,12 @@
-import { hrtime } from '@env/hrtime';
 import type {
 	WidthOptions as StringWidthOptions,
 	TruncationOptions as StringWidthTruncationOptions,
 	Result as TruncatedStringWidthResult,
 } from '@gk-nzaytsev/fast-string-truncated-width';
 import getTruncatedStringWidth from '@gk-nzaytsev/fast-string-truncated-width';
+import { hrtime } from '@env/hrtime';
 import { CharCode } from '../constants';
+import { getNumericFormat } from './date';
 
 export { fromBase64, base64 } from '@env/base64';
 
@@ -180,6 +181,10 @@ export function* getLines(data: string | string[], char: string = '\n'): Iterabl
 			i = j + 1;
 		}
 	}
+}
+
+export function getPossessiveForm(name: string) {
+	return name.endsWith('s') ? `${name}'` : `${name}'s`;
 }
 
 const defaultTruncationOptions: StringWidthTruncationOptions = {
@@ -475,6 +480,8 @@ export function padOrTruncateEnd(s: string, maxLength: number, fillString?: stri
 	return s.padEnd(maxLength, fillString);
 }
 
+let numericFormat: ReturnType<typeof getNumericFormat> | undefined;
+
 export function pluralize(
 	s: string,
 	count: number,
@@ -482,7 +489,7 @@ export function pluralize(
 		/** Controls the character/string between the count and the string */
 		infix?: string;
 		/** Formats the count */
-		format?: (count: number) => string | undefined;
+		format?: false | ((count: number) => string | undefined);
 		/** Controls if only the string should be included */
 		only?: boolean;
 		/** Controls the plural version of the string */
@@ -491,12 +498,27 @@ export function pluralize(
 		zero?: string;
 	},
 ) {
-	if (options == null) return `${count} ${s}${count === 1 ? '' : 's'}`;
+	if (options == null) {
+		numericFormat ??= getNumericFormat();
+		return `${numericFormat(count)} ${s}${count === 1 ? '' : 's'}`;
+	}
 
 	const suffix = count === 1 ? s : options.plural ?? `${s}s`;
 	if (options.only) return suffix;
 
-	return `${count === 0 ? options.zero ?? count : options.format?.(count) ?? count}${options.infix ?? ' '}${suffix}`;
+	let result;
+	if (count === 0) {
+		result = options.zero ?? count;
+	} else if (options.format === false) {
+		result = count;
+	} else if (options.format != null) {
+		result = options.format(count);
+	} else {
+		numericFormat ??= getNumericFormat();
+		result = numericFormat(count);
+	}
+
+	return `${result}${options.infix ?? ' '}${suffix}`;
 }
 
 // Removes \ / : * ? " < > | and C0 and C1 control codes

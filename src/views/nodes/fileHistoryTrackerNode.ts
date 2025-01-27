@@ -1,19 +1,21 @@
 import type { TextEditor } from 'vscode';
-import { Disposable, FileType, TreeItem, TreeItemCollapsibleState, window, workspace } from 'vscode';
+import { Disposable, TreeItem, TreeItemCollapsibleState, window } from 'vscode';
 import type { GitCommitish } from '../../git/gitUri';
 import { GitUri, unknownGitUri } from '../../git/gitUri';
-import { isBranchReference, isSha } from '../../git/models/reference';
+import { isBranchReference } from '../../git/utils/reference.utils';
+import { isSha } from '../../git/utils/revision.utils';
 import { showReferencePicker } from '../../quickpicks/referencePicker';
+import { setContext } from '../../system/-webview/context';
+import { isFolderUri } from '../../system/-webview/path';
+import { isVirtualUri } from '../../system/-webview/vscode';
 import { UriComparer } from '../../system/comparers';
-import { gate } from '../../system/decorators/gate';
+import { gate } from '../../system/decorators/-webview/gate';
 import { debug, log } from '../../system/decorators/log';
 import { weakEvent } from '../../system/event';
 import type { Deferrable } from '../../system/function';
 import { debounce } from '../../system/function';
 import { Logger } from '../../system/logger';
 import { getLogScope, setLogScopeExit } from '../../system/logger.scope';
-import { setContext } from '../../system/vscode/context';
-import { isVirtualUri } from '../../system/vscode/utils';
 import type { FileHistoryView } from '../fileHistoryView';
 import { SubscribeableViewNode } from './abstract/subscribeableViewNode';
 import type { ViewNode } from './abstract/viewNode';
@@ -61,22 +63,15 @@ export class FileHistoryTrackerNode extends SubscribeableViewNode<'file-history-
 				sha: this._base ?? this.uri.sha,
 			};
 			const fileUri = new GitUri(this.uri, commitish);
-
-			let folder = false;
-			try {
-				const stats = await workspace.fs.stat(this.uri);
-				if ((stats.type & FileType.Directory) === FileType.Directory) {
-					folder = true;
-				}
-			} catch {}
+			const folder = await isFolderUri(this.uri);
 
 			this.view.title = folder ? 'Folder History' : 'File History';
 
 			let branch;
 			if (!commitish.sha || commitish.sha === 'HEAD') {
-				branch = await this.view.container.git.getBranch(this.uri.repoPath);
+				branch = await this.view.container.git.branches(commitish.repoPath).getBranch();
 			} else if (!isSha(commitish.sha)) {
-				branch = await this.view.container.git.getBranch(this.uri.repoPath, commitish.sha);
+				branch = await this.view.container.git.branches(commitish.repoPath).getBranch(commitish.sha);
 			}
 			this.child = new FileHistoryNode(fileUri, this.view, this, folder, branch);
 		}
@@ -117,7 +112,7 @@ export class FileHistoryTrackerNode extends SubscribeableViewNode<'file-history-
 		if (pick == null) return;
 
 		if (isBranchReference(pick)) {
-			const branch = await this.view.container.git.getBranch(this.uri.repoPath);
+			const branch = await this.view.container.git.branches(this.uri.repoPath!).getBranch();
 			this._base = branch?.name === pick.name ? undefined : pick.ref;
 		} else {
 			this._base = pick.ref;

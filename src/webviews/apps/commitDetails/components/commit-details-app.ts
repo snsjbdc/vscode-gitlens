@@ -3,8 +3,9 @@ import { html, LitElement, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { when } from 'lit/directives/when.js';
 import type { ViewFilesLayout } from '../../../../config';
+import type { Commands } from '../../../../constants.commands';
+import type { Serialized } from '../../../../system/-webview/serialize';
 import { pluralize } from '../../../../system/string';
-import type { Serialized } from '../../../../system/vscode/serialize';
 import type { DraftState, ExecuteCommitActionsParams, Mode, State } from '../../../commitDetails/protocol';
 import {
 	ChangeReviewModeCommand,
@@ -69,7 +70,7 @@ export const uncommittedSha = '0000000000000000000000000000000000000000';
 interface ExplainState {
 	cancelled?: boolean;
 	error?: { message: string };
-	summary?: string;
+	result?: { summary: string; body: string };
 }
 
 @customElement('gl-commit-details-app')
@@ -583,8 +584,8 @@ export class GlCommitDetailsApp extends LitElement {
 		this._hostIpc.sendCommand(CreatePatchFromWipCommand, { changes: this.state.wip.changes, checked: checked });
 	}
 
-	private onCommandClickedCore(action?: string) {
-		const command = action?.startsWith('command:') ? action.slice(8) : action;
+	private onCommandClickedCore(action?: Commands | `command:${Commands}`) {
+		const command = (action?.startsWith('command:') ? action.slice(8) : action) as Commands | undefined;
 		if (command == null) return;
 
 		this._hostIpc.sendCommand(ExecuteCommand, { command: command });
@@ -599,10 +600,8 @@ export class GlCommitDetailsApp extends LitElement {
 			const result = await this._hostIpc.sendRequest(ExplainRequest, undefined);
 			if (result.error) {
 				this.explain = { error: { message: result.error.message ?? 'Error retrieving content' } };
-			} else if (result.summary) {
-				this.explain = { summary: result.summary };
 			} else {
-				this.explain = undefined;
+				this.explain = result;
 			}
 		} catch (_ex) {
 			this.explain = { error: { message: 'Error retrieving content' } };

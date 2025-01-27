@@ -2,25 +2,26 @@ import type { CancellationToken, ConfigurationChangeEvent } from 'vscode';
 import { Disposable, ProgressLocation, ThemeIcon, TreeItem, TreeItemCollapsibleState, window } from 'vscode';
 import type { CommitsViewConfig, ViewFilesLayout } from '../config';
 import { GlyphChars } from '../constants';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { GitUri } from '../git/gitUri';
 import type { GitCommit } from '../git/models/commit';
 import { isCommit } from '../git/models/commit';
-import { matchContributor } from '../git/models/contributor';
 import type { GitRevisionReference } from '../git/models/reference';
-import { getReferenceLabel } from '../git/models/reference';
 import type { RepositoryChangeEvent } from '../git/models/repository';
-import { Repository, RepositoryChange, RepositoryChangeComparisonMode } from '../git/models/repository';
+import { RepositoryChange, RepositoryChangeComparisonMode } from '../git/models/repository';
 import type { GitUser } from '../git/models/user';
+import { matchContributor } from '../git/utils/contributor.utils';
+import { getLastFetchedUpdateInterval } from '../git/utils/fetch.utils';
+import { getReferenceLabel } from '../git/utils/reference.utils';
 import { showContributorsPicker } from '../quickpicks/contributorsPicker';
 import { getRepositoryOrShowPicker } from '../quickpicks/repositoryPicker';
-import { gate } from '../system/decorators/gate';
+import { createCommand, executeCommand } from '../system/-webview/command';
+import { configuration } from '../system/-webview/configuration';
+import { setContext } from '../system/-webview/context';
+import { gate } from '../system/decorators/-webview/gate';
 import { debug } from '../system/decorators/log';
 import { disposableInterval } from '../system/function';
-import { createCommand, executeCommand } from '../system/vscode/command';
-import { configuration } from '../system/vscode/configuration';
-import { setContext } from '../system/vscode/context';
 import type { UsageChangeEvent } from '../telemetry/usageTracker';
 import { RepositoriesSubscribeableNode } from './nodes/abstract/repositoriesSubscribeableNode';
 import { RepositoryFolderNode } from './nodes/abstract/repositoryFolderNode';
@@ -34,7 +35,7 @@ import { registerViewCommand } from './viewCommands';
 export class CommitsRepositoryNode extends RepositoryFolderNode<CommitsView, BranchNode> {
 	async getChildren(): Promise<ViewNode[]> {
 		if (this.child == null) {
-			const branch = await this.repo.git.getBranch();
+			const branch = await this.repo.git.branches().getBranch();
 			if (branch == null) {
 				this.view.message = 'No commits could be found.';
 
@@ -57,6 +58,7 @@ export class CommitsRepositoryNode extends RepositoryFolderNode<CommitsView, Bra
 					showComparison: this.view.config.showBranchComparison,
 					showStatusDecorationOnly: true,
 					showMergeCommits: !this.view.state.hideMergeCommits,
+					showStashes: this.view.config.showStashes,
 					showTracking: true,
 					authors: authors,
 				},
@@ -82,13 +84,13 @@ export class CommitsRepositoryNode extends RepositoryFolderNode<CommitsView, Bra
 	protected override async subscribe() {
 		const lastFetched = (await this.repo?.getLastFetched()) ?? 0;
 
-		const interval = Repository.getLastFetchedUpdateInterval(lastFetched);
+		const interval = getLastFetchedUpdateInterval(lastFetched);
 		if (lastFetched !== 0 && interval > 0) {
 			return Disposable.from(
 				await super.subscribe(),
 				disposableInterval(() => {
 					// Check if the interval should change, and if so, reset it
-					if (interval !== Repository.getLastFetchedUpdateInterval(lastFetched)) {
+					if (interval !== getLastFetchedUpdateInterval(lastFetched)) {
 						void this.resetSubscription();
 					}
 
@@ -105,13 +107,17 @@ export class CommitsRepositoryNode extends RepositoryFolderNode<CommitsView, Bra
 	}
 
 	protected changed(e: RepositoryChangeEvent) {
+		if (this.view.config.showStashes && e.changed(RepositoryChange.Stash, RepositoryChangeComparisonMode.Any)) {
+			return true;
+		}
+
 		return e.changed(
 			RepositoryChange.Config,
 			RepositoryChange.Heads,
 			RepositoryChange.Index,
 			RepositoryChange.Remotes,
 			RepositoryChange.RemoteProviders,
-			RepositoryChange.Status,
+			RepositoryChange.PausedOperationStatus,
 			RepositoryChange.Unknown,
 			RepositoryChangeComparisonMode.Any,
 		);
@@ -120,17 +126,21 @@ export class CommitsRepositoryNode extends RepositoryFolderNode<CommitsView, Bra
 
 export class CommitsViewNode extends RepositoriesSubscribeableNode<CommitsView, CommitsRepositoryNode> {
 	async getChildren(): Promise<ViewNode[]> {
+		this.view.description = this.view.getViewDescription();
+		this.view.message = undefined;
+
 		if (this.children == null) {
+			if (this.view.container.git.isDiscoveringRepositories) {
+				this.view.message = 'Loading commits...';
+				await this.view.container.git.isDiscoveringRepositories;
+			}
+
 			const repositories = this.view.container.git.openRepositories;
 			if (repositories.length === 0) {
-				this.view.message = this.view.container.git.isDiscoveringRepositories
-					? 'Loading commits...'
-					: 'No commits could be found.';
+				this.view.message = 'No commits could be found.';
 
 				return [];
 			}
-
-			this.view.message = undefined;
 
 			const splat = repositories.length === 1;
 			this.children = repositories.map(
@@ -141,38 +151,56 @@ export class CommitsViewNode extends RepositoriesSubscribeableNode<CommitsView, 
 			);
 		}
 
-		const commitGraphNode =
+		const children = [];
+
+		if (
 			configuration.get('plusFeatures.enabled') &&
+			!this.view.grouped &&
 			this.view.container.usage.get('graphView:shown') == null &&
 			this.view.container.usage.get('graphWebview:shown') == null
-				? new CommandMessageNode(
-						this.view,
-						this,
-						createCommand(Commands.ShowGraph, 'Show Commit Graph'),
-						'Visualize commits on the Commit Graph',
-						undefined,
-						'Visualize commits on the Commit Graph',
-						new ThemeIcon('gitlens-graph'),
-				  )
-				: undefined;
+		) {
+			children.push(
+				new CommandMessageNode(
+					this.view,
+					this,
+					createCommand(GlCommand.ShowGraph, 'Show Commit Graph'),
+					'Visualize commits on the Commit Graph',
+					undefined,
+					'Visualize commits on the Commit Graph',
+					new ThemeIcon('gitlens-graph'),
+				),
+			);
+		}
 
 		if (this.children.length === 1) {
 			const [child] = this.children;
 
-			const branch = await child.repo.git.getBranch();
+			const branch = await child.repo.git.branches().getBranch();
 			if (branch != null) {
-				const lastFetched = (await child.repo.getLastFetched()) ?? 0;
+				const descParts = [];
+
+				if (branch.rebasing) {
+					descParts.push(`${branch.name} (Rebasing)`);
+				} else {
+					descParts.push(branch.name);
+				}
 
 				const status = branch.getTrackingStatus();
-				this.view.description = `${status ? `${status} ${GlyphChars.Dot} ` : ''}${branch.name}${
-					branch.rebasing ? ' (Rebasing)' : ''
-				}${lastFetched ? ` ${GlyphChars.Dot} Last fetched ${Repository.formatLastFetched(lastFetched)}` : ''}`;
+				if (status) {
+					descParts.push(status);
+				}
+
+				this.view.description = `${
+					this.view.grouped ? `${this.view.name.toLocaleLowerCase()}: ` : ''
+				}${descParts.join(` ${GlyphChars.Dot} `)}`;
 			}
 
-			return commitGraphNode == null ? child.getChildren() : [commitGraphNode, ...(await child.getChildren())];
+			children.push(...(await child.getChildren()));
+		} else {
+			children.push(...this.children);
 		}
 
-		return commitGraphNode == null ? this.children : [commitGraphNode, ...this.children];
+		return children;
 	}
 
 	getTreeItem(): TreeItem {
@@ -189,8 +217,8 @@ interface CommitsViewState {
 export class CommitsView extends ViewBase<'commits', CommitsViewNode, CommitsViewConfig> {
 	protected readonly configKey = 'commits';
 
-	constructor(container: Container) {
-		super(container, 'commits', 'Commits', 'commitsView');
+	constructor(container: Container, grouped?: boolean) {
+		super(container, 'commits', 'Commits', 'commitsView', grouped);
 		this.disposables.push(container.usage.onDidChange(this.onUsageChanged, this));
 	}
 
@@ -219,12 +247,10 @@ export class CommitsView extends ViewBase<'commits', CommitsViewNode, CommitsVie
 	}
 
 	protected registerCommands(): Disposable[] {
-		void this.container.viewCommands;
-
 		return [
 			registerViewCommand(
 				this.getQualifiedCommand('copy'),
-				() => executeCommand(Commands.ViewsCopy, this.activeSelection, this.selection),
+				() => executeCommand(GlCommand.ViewsCopy, this.activeSelection, this.selection),
 				this,
 			),
 			registerViewCommand(
@@ -293,6 +319,8 @@ export class CommitsView extends ViewBase<'commits', CommitsViewNode, CommitsVie
 				() => this.setShowBranchPullRequest(false),
 				this,
 			),
+			registerViewCommand(this.getQualifiedCommand('setShowStashesOn'), () => this.setShowStashes(true), this),
+			registerViewCommand(this.getQualifiedCommand('setShowStashesOff'), () => this.setShowStashes(false), this),
 		];
 	}
 
@@ -319,11 +347,12 @@ export class CommitsView extends ViewBase<'commits', CommitsViewNode, CommitsVie
 	async findCommit(commit: GitCommit | { repoPath: string; ref: string }, token?: CancellationToken) {
 		const { repoPath } = commit;
 
-		const branch = await this.container.git.getBranch(commit.repoPath);
+		const branchesProvider = this.container.git.branches(commit.repoPath);
+		const branch = await branchesProvider.getBranch();
 		if (branch == null) return undefined;
 
 		// Check if the commit exists on the current branch
-		const branches = await this.container.git.getCommitBranches(commit.repoPath, commit.ref, branch.name, {
+		const branches = await branchesProvider.getBranchesWithCommits([commit.ref], branch.name, {
 			commitDate: isCommit(commit) ? commit.committer.date : undefined,
 		});
 		if (!branches.length) return undefined;
@@ -491,5 +520,9 @@ export class CommitsView extends ViewBase<'commits', CommitsViewNode, CommitsVie
 	private async setShowBranchPullRequest(enabled: boolean) {
 		await configuration.updateEffective(`views.${this.configKey}.pullRequests.showForBranches` as const, enabled);
 		await configuration.updateEffective(`views.${this.configKey}.pullRequests.enabled` as const, enabled);
+	}
+
+	private setShowStashes(enabled: boolean) {
+		return configuration.updateEffective(`views.${this.configKey}.showStashes` as const, enabled);
 	}
 }

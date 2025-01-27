@@ -2,7 +2,7 @@ import { Badge, defineGkElement, Menu, MenuItem, Popover } from '@gitkraken/shar
 import { html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import { when } from 'lit/directives/when.js';
-import type { DraftDetails, Mode, State } from '../../../../../plus/webviews/patchDetails/protocol';
+import type { DraftDetails, Mode, State } from '../../../../plus/patchDetails/protocol';
 import { GlElement } from '../../../shared/components/element';
 import type { PatchDetailsApp } from '../patchDetails';
 import './gl-draft-details';
@@ -11,7 +11,7 @@ import './gl-patch-create';
 interface ExplainState {
 	cancelled?: boolean;
 	error?: { message: string };
-	summary?: string;
+	result?: { summary: string; body: string };
 }
 
 interface GenerateState {

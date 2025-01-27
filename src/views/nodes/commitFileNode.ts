@@ -2,17 +2,17 @@ import type { Command, Selection } from 'vscode';
 import { TreeItem, TreeItemCollapsibleState, Uri } from 'vscode';
 import type { DiffWithPreviousCommandArgs } from '../../commands/diffWithPrevious';
 import { Schemes } from '../../constants';
-import { Commands } from '../../constants.commands';
+import { GlCommand } from '../../constants.commands';
 import type { TreeViewRefFileNodeTypes } from '../../constants.views';
 import { StatusFileFormatter } from '../../git/formatters/statusFormatter';
 import { GitUri } from '../../git/gitUri';
 import type { GitBranch } from '../../git/models/branch';
 import type { GitCommit } from '../../git/models/commit';
 import type { GitFile } from '../../git/models/file';
-import { getGitFileStatusIcon } from '../../git/models/file';
 import type { GitRevisionReference } from '../../git/models/reference';
+import { getGitFileStatusIcon } from '../../git/utils/fileStatus.utils';
+import { relativeDir } from '../../system/-webview/path';
 import { joinPaths } from '../../system/path';
-import { relativeDir } from '../../system/vscode/path';
 import type { ViewsWithCommits, ViewsWithStashes } from '../viewBase';
 import { createViewDecorationUri } from '../viewDecorationProvider';
 import { getFileTooltipMarkdown } from './abstract/viewFileNode';
@@ -67,10 +67,9 @@ export abstract class CommitFileNodeBase<
 			// Try to get the commit directly from the multi-file commit
 			const commit = await this.commit.getCommitForFile(this.file);
 			if (commit == null) {
-				const log = await this.view.container.git.getLogForFile(this.repoPath, this.file.path, {
-					limit: 2,
-					ref: this.commit.sha,
-				});
+				const log = await this.view.container.git
+					.commits(this.repoPath)
+					.getLogForFile(this.file.path, this.commit.sha, { limit: 2 });
 				if (log != null) {
 					this.commit = log.commits.get(this.commit.sha) ?? this.commit;
 				}
@@ -175,7 +174,7 @@ export abstract class CommitFileNodeBase<
 		};
 		return {
 			title: 'Open Changes with Previous Revision',
-			command: Commands.DiffWithPrevious,
+			command: GlCommand.DiffWithPrevious,
 			arguments: [undefined, commandArgs],
 		};
 	}

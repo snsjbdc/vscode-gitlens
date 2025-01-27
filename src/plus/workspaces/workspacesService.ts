@@ -1,42 +1,40 @@
-import { getSupportedWorkspacesPathMappingProvider } from '@env/providers';
 import type { CancellationToken, Event, MessageItem, QuickPickItem } from 'vscode';
 import { Disposable, EventEmitter, ProgressLocation, Uri, window, workspace } from 'vscode';
-import { SubscriptionState } from '../../constants.subscription';
+import { getSupportedWorkspacesPathMappingProvider } from '@env/providers';
 import type { Container } from '../../container';
 import type { GitRemote } from '../../git/models/remote';
 import { RemoteResourceType } from '../../git/models/remoteResource';
 import { Repository } from '../../git/models/repository';
 import { showRepositoriesPicker } from '../../quickpicks/repositoryPicker';
+import type { OpenWorkspaceLocation } from '../../system/-webview/vscode';
+import { openWorkspace } from '../../system/-webview/vscode';
 import { log } from '../../system/decorators/log';
 import { normalizePath } from '../../system/path';
-import type { OpenWorkspaceLocation } from '../../system/vscode/utils';
-import { openWorkspace } from '../../system/vscode/utils';
-import type { SubscriptionChangeEvent } from '../gk/account/subscriptionService';
 import type { ServerConnection } from '../gk/serverConnection';
+import type { SubscriptionChangeEvent } from '../gk/subscriptionService';
+import { isSubscriptionStatePaidOrTrial } from '../gk/utils/subscription.utils';
+import type { CloudWorkspaceData, CloudWorkspaceRepositoryDescriptor } from './models/cloudWorkspace';
+import {
+	CloudWorkspace,
+	CloudWorkspaceProviderInputType,
+	CloudWorkspaceProviderType,
+	cloudWorkspaceProviderTypeToRemoteProviderId,
+} from './models/cloudWorkspace';
+import type { LocalWorkspaceData, LocalWorkspaceRepositoryDescriptor } from './models/localWorkspace';
+import { LocalWorkspace } from './models/localWorkspace';
 import type {
 	AddWorkspaceRepoDescriptor,
-	CloudWorkspaceData,
-	CloudWorkspaceRepositoryDescriptor,
 	GetWorkspacesResponse,
 	LoadCloudWorkspacesResponse,
 	LoadLocalWorkspacesResponse,
-	LocalWorkspaceData,
-	LocalWorkspaceRepositoryDescriptor,
 	RemoteDescriptor,
 	RepositoryMatch,
 	WorkspaceAutoAddSetting,
 	WorkspaceRepositoriesByName,
 	WorkspaceRepositoryRelation,
 	WorkspacesResponse,
-} from './models';
-import {
-	CloudWorkspace,
-	CloudWorkspaceProviderInputType,
-	CloudWorkspaceProviderType,
-	cloudWorkspaceProviderTypeToRemoteProviderId,
-	LocalWorkspace,
-	WorkspaceAddRepositoriesChoice,
-} from './models';
+} from './models/workspaces';
+import { WorkspaceAddRepositoriesChoice } from './models/workspaces';
 import { WorkspacesApi } from './workspacesApi';
 import type { WorkspacesPathMappingProvider } from './workspacesPathMappingProvider';
 
@@ -115,11 +113,7 @@ export class WorkspacesService implements Disposable {
 		}
 
 		let filteredSharedWorkspaceCount = 0;
-		const isPlusEnabled =
-			subscription.state === SubscriptionState.ProPreview ||
-			subscription.state === SubscriptionState.ProTrial ||
-			subscription.state === SubscriptionState.Paid;
-
+		const isPlusEnabled = isSubscriptionStatePaidOrTrial(subscription.state);
 		if (workspaces?.length) {
 			for (const workspace of workspaces) {
 				const localPath = await this._workspacesPathProvider.getCloudWorkspaceCodeWorkspacePath(workspace.id);
@@ -323,7 +317,7 @@ export class WorkspacesService implements Disposable {
 			const change = { title: 'Change Auto-Add Behavior...' };
 			const cancel = { title: 'Cancel', isCloseAffordance: true };
 			const addChoice = await window.showInformationMessage(
-				'New repositories found in the linked GitKraken workspace. Would you like to add them to the current VS Code workspace?',
+				'New repositories found in the linked Cloud workspace. Would you like to add them to the current VS Code workspace?',
 				add,
 				change,
 				cancel,
@@ -479,7 +473,7 @@ export class WorkspacesService implements Disposable {
 
 		const repoPath = repo.uri.fsPath;
 
-		const remotes = await repo.git.getRemotes();
+		const remotes = await repo.git.remotes().getRemotes();
 		const remoteUrls: string[] = [];
 		for (const remote of remotes) {
 			const remoteUrl = remote.provider?.url({ type: RemoteResourceType.Repo });
@@ -551,7 +545,7 @@ export class WorkspacesService implements Disposable {
 		if (options?.repos != null && options.repos.length > 0) {
 			// Currently only GitHub is supported.
 			for (const repo of options.repos) {
-				const repoRemotes = await repo.git.getRemotes({ filter: r => r.domain === 'github.com' });
+				const repoRemotes = await repo.git.remotes().getRemotes({ filter: r => r.domain === 'github.com' });
 				if (repoRemotes.length === 0) {
 					await window.showErrorMessage(
 						`Only GitHub is supported for this operation. Please ensure all open repositories are hosted on GitHub.`,
@@ -791,7 +785,7 @@ export class WorkspacesService implements Disposable {
 	): Promise<Repository[]> {
 		const validRepos: Repository[] = [];
 		for (const repo of repos) {
-			const matchingRemotes = await repo.git.getRemotes({
+			const matchingRemotes = await repo.git.remotes().getRemotes({
 				filter: r => r.provider?.id === cloudWorkspaceProviderTypeToRemoteProviderId[provider],
 			});
 			if (matchingRemotes.length) {
@@ -917,7 +911,8 @@ export class WorkspacesService implements Disposable {
 					? repoOrPath
 					: await this.container.git.getOrOpenRepository(Uri.file(repoOrPath), { closeOnOpen: true });
 			if (repo == null) continue;
-			const remote = (await repo.git.getRemote('origin')) || (await repo.git.getRemotes())?.[0];
+			const remote =
+				(await repo.git.remotes().getRemote('origin')) || (await repo.git.remotes().getRemotes())?.[0];
 			const remoteDescriptor = getRemoteDescriptor(remote);
 			if (remoteDescriptor == null) continue;
 			repoInputs.push({
@@ -1052,7 +1047,7 @@ export class WorkspacesService implements Disposable {
 			reposPathMap.set(normalizePath(repo.uri.fsPath.toLowerCase()), repo);
 
 			if (workspace instanceof CloudWorkspace) {
-				const remotes = await repo.git.getRemotes();
+				const remotes = await repo.git.remotes().getRemotes();
 				for (const remote of remotes) {
 					const remoteDescriptor = getRemoteDescriptor(remote);
 					if (remoteDescriptor == null) continue;

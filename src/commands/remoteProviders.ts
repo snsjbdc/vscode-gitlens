@@ -1,4 +1,4 @@
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import type { GitCommit } from '../git/models/commit';
 import type { GitRemote } from '../git/models/remote';
@@ -6,11 +6,12 @@ import { isRemote } from '../git/models/remote';
 import type { Repository } from '../git/models/repository';
 import type { RemoteProvider } from '../git/remotes/remoteProvider';
 import { showRepositoryPicker } from '../quickpicks/repositoryPicker';
+import { command } from '../system/-webview/command';
 import { createMarkdownCommandLink } from '../system/commands';
 import { first } from '../system/iterable';
-import { command } from '../system/vscode/command';
-import type { CommandContext } from './base';
-import { Command, isCommandContextViewNodeHasRemote } from './base';
+import { GlCommandBase } from './commandBase';
+import type { CommandContext } from './commandContext';
+import { isCommandContextViewNodeHasRemote } from './commandContext.utils';
 
 export interface ConnectRemoteProviderCommandArgs {
 	remote: string;
@@ -18,7 +19,7 @@ export interface ConnectRemoteProviderCommandArgs {
 }
 
 @command()
-export class ConnectRemoteProviderCommand extends Command {
+export class ConnectRemoteProviderCommand extends GlCommandBase {
 	static createMarkdownCommandLink(args: ConnectRemoteProviderCommandArgs): string;
 	static createMarkdownCommandLink(remote: GitRemote): string;
 	static createMarkdownCommandLink(argsOrRemote: ConnectRemoteProviderCommandArgs | GitRemote): string {
@@ -32,11 +33,11 @@ export class ConnectRemoteProviderCommand extends Command {
 			args = argsOrRemote;
 		}
 
-		return createMarkdownCommandLink<ConnectRemoteProviderCommandArgs>(Commands.ConnectRemoteProvider, args);
+		return createMarkdownCommandLink<ConnectRemoteProviderCommandArgs>(GlCommand.ConnectRemoteProvider, args);
 	}
 
 	constructor(private readonly container: Container) {
-		super(Commands.ConnectRemoteProvider);
+		super(GlCommand.ConnectRemoteProvider);
 	}
 
 	protected override preExecute(context: CommandContext, args?: ConnectRemoteProviderCommandArgs) {
@@ -55,7 +56,7 @@ export class ConnectRemoteProviderCommand extends Command {
 			const repos = new Map<Repository, GitRemote<RemoteProvider>>();
 
 			for (const repo of this.container.git.openRepositories) {
-				const remote = await repo.git.getBestRemoteWithIntegration({ includeDisconnected: true });
+				const remote = await repo.git.remotes().getBestRemoteWithIntegration({ includeDisconnected: true });
 				if (remote?.provider != null) {
 					repos.set(repo, remote);
 				}
@@ -80,12 +81,14 @@ export class ConnectRemoteProviderCommand extends Command {
 		} else if (args?.remote == null) {
 			repoPath = args.repoPath;
 
-			remote = await this.container.git.getBestRemoteWithIntegration(repoPath, { includeDisconnected: true });
+			remote = await this.container.git
+				.remotes(repoPath)
+				.getBestRemoteWithIntegration({ includeDisconnected: true });
 			if (remote == null) return false;
 		} else {
 			repoPath = args.repoPath;
 
-			remotes = await this.container.git.getRemotesWithProviders(repoPath);
+			remotes = await this.container.git.remotes(repoPath).getRemotesWithProviders();
 			remote = remotes.find(r => r.name === args.remote) as GitRemote<RemoteProvider> | undefined;
 			if (!remote?.hasIntegration()) return false;
 		}
@@ -97,7 +100,7 @@ export class ConnectRemoteProviderCommand extends Command {
 
 		if (
 			connected &&
-			!(remotes ?? (await this.container.git.getRemotesWithProviders(repoPath))).some(r => r.default)
+			!(remotes ?? (await this.container.git.remotes(repoPath).getRemotesWithProviders())).some(r => r.default)
 		) {
 			await remote.setAsDefault(true);
 		}
@@ -111,7 +114,7 @@ export interface DisconnectRemoteProviderCommandArgs {
 }
 
 @command()
-export class DisconnectRemoteProviderCommand extends Command {
+export class DisconnectRemoteProviderCommand extends GlCommandBase {
 	static createMarkdownCommandLink(args: DisconnectRemoteProviderCommandArgs): string;
 	static createMarkdownCommandLink(remote: GitRemote): string;
 	static createMarkdownCommandLink(argsOrRemote: DisconnectRemoteProviderCommandArgs | GitRemote): string {
@@ -125,11 +128,11 @@ export class DisconnectRemoteProviderCommand extends Command {
 			args = argsOrRemote;
 		}
 
-		return createMarkdownCommandLink<DisconnectRemoteProviderCommandArgs>(Commands.DisconnectRemoteProvider, args);
+		return createMarkdownCommandLink<DisconnectRemoteProviderCommandArgs>(GlCommand.DisconnectRemoteProvider, args);
 	}
 
 	constructor(private readonly container: Container) {
-		super(Commands.DisconnectRemoteProvider);
+		super(GlCommand.DisconnectRemoteProvider);
 	}
 
 	protected override preExecute(context: CommandContext, args?: DisconnectRemoteProviderCommandArgs) {
@@ -147,7 +150,7 @@ export class DisconnectRemoteProviderCommand extends Command {
 			const repos = new Map<Repository, GitRemote<RemoteProvider>>();
 
 			for (const repo of this.container.git.openRepositories) {
-				const remote = await repo.git.getBestRemoteWithIntegration({ includeDisconnected: false });
+				const remote = await repo.git.remotes().getBestRemoteWithIntegration({ includeDisconnected: false });
 				if (remote != null) {
 					repos.set(repo, remote);
 				}
@@ -172,12 +175,16 @@ export class DisconnectRemoteProviderCommand extends Command {
 		} else if (args?.remote == null) {
 			repoPath = args.repoPath;
 
-			remote = await this.container.git.getBestRemoteWithIntegration(repoPath, { includeDisconnected: false });
+			remote = await this.container.git
+				.remotes(repoPath)
+				.getBestRemoteWithIntegration({ includeDisconnected: false });
 			if (remote == null) return undefined;
 		} else {
 			repoPath = args.repoPath;
 
-			remote = (await this.container.git.getRemotesWithProviders(repoPath)).find(r => r.name === args.remote);
+			remote = (await this.container.git.remotes(repoPath).getRemotesWithProviders()).find(
+				r => r.name === args.remote,
+			);
 			if (!remote?.hasIntegration()) return undefined;
 		}
 

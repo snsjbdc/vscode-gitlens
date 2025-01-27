@@ -13,10 +13,10 @@ import { showContributorsPicker } from '../../quickpicks/contributorsPicker';
 import type { QuickPickItemOfT } from '../../quickpicks/items/common';
 import { ActionQuickPickItem } from '../../quickpicks/items/common';
 import { isDirectiveQuickPickItem } from '../../quickpicks/items/directive';
+import { configuration } from '../../system/-webview/configuration';
+import { getContext } from '../../system/-webview/context';
 import { first, join, map } from '../../system/iterable';
 import { pluralize } from '../../system/string';
-import { configuration } from '../../system/vscode/configuration';
-import { getContext } from '../../system/vscode/context';
 import { SearchResultsNode } from '../../views/nodes/searchResultsNode';
 import type { ViewsWithRepositoryFolders } from '../../views/viewBase';
 import type {
@@ -28,14 +28,7 @@ import type {
 	StepSelection,
 	StepState,
 } from '../quickCommand';
-import {
-	canPickStepContinue,
-	createPickStep,
-	endSteps,
-	freezeStep,
-	QuickCommand,
-	StepResultBreak,
-} from '../quickCommand';
+import { canPickStepContinue, createPickStep, endSteps, QuickCommand, StepResultBreak } from '../quickCommand';
 import {
 	MatchAllToggleQuickInputButton,
 	MatchCaseToggleQuickInputButton,
@@ -138,7 +131,7 @@ export class SearchGitCommand extends QuickCommand<State> {
 		const context: Context = {
 			container: this.container,
 			repos: this.container.git.openRepositories,
-			associatedView: this.container.searchAndCompareView,
+			associatedView: this.container.views.searchAndCompare,
 			commit: undefined,
 			hasVirtualFolders: getContext('gitlens:hasVirtualFolders', false),
 			resultsKey: undefined,
@@ -208,12 +201,12 @@ export class SearchGitCommand extends QuickCommand<State> {
 			const searchKey = getSearchQueryComparisonKey(search);
 
 			if (context.resultsPromise == null || context.resultsKey !== searchKey) {
-				context.resultsPromise = state.repo.git.richSearchCommits(search);
+				context.resultsPromise = state.repo.git.commits().searchCommits(search);
 				context.resultsKey = searchKey;
 			}
 
 			if (state.showResultsInSideBar) {
-				void this.container.searchAndCompareView.search(
+				void this.container.views.searchAndCompare.search(
 					state.repo.path,
 					search,
 					{
@@ -242,7 +235,7 @@ export class SearchGitCommand extends QuickCommand<State> {
 					showInSideBarCommand: new ActionQuickPickItem(
 						'$(link-external)  Show Results in Side Bar',
 						() =>
-							void this.container.searchAndCompareView.search(
+							void this.container.views.searchAndCompare.search(
 								repoPath,
 								search,
 								{
@@ -259,7 +252,7 @@ export class SearchGitCommand extends QuickCommand<State> {
 					showInSideBarButton: {
 						button: ShowResultsInSideBarQuickInputButton,
 						onDidClick: () =>
-							void this.container.searchAndCompareView.search(
+							void this.container.views.searchAndCompare.search(
 								repoPath,
 								search,
 								{
@@ -470,7 +463,7 @@ async function updateSearchQuery(
 	let append = false;
 
 	if (usePickers?.author && item.item === 'author:') {
-		using frozen = freezeStep(step, quickpick);
+		using _frozen = step.freeze?.();
 
 		const authors = ops.get('author:');
 
@@ -492,8 +485,6 @@ async function updateSearchQuery(
 			},
 		);
 
-		frozen[Symbol.dispose]();
-
 		if (contributors != null) {
 			const authors = contributors
 				.map(c => c.email ?? c.name ?? c.username)
@@ -507,7 +498,7 @@ async function updateSearchQuery(
 			append = true;
 		}
 	} else if (usePickers?.file && item.item === 'file:') {
-		using frozen = freezeStep(step, quickpick);
+		using _frozen = step.freeze?.();
 
 		let files = ops.get('file:');
 
@@ -519,8 +510,6 @@ async function updateSearchQuery(
 			openLabel: 'Add to Search',
 			defaultUri: state.repo.folder?.uri,
 		});
-
-		frozen[Symbol.dispose]();
 
 		if (uris?.length) {
 			if (files == null) {

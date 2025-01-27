@@ -1,26 +1,23 @@
 import type { TextEditor, Uri } from 'vscode';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { GitUri } from '../git/gitUri';
-import { deletedOrMissing } from '../git/models/constants';
-import { isUncommitted } from '../git/models/reference';
 import { RemoteResourceType } from '../git/models/remoteResource';
+import { deletedOrMissing } from '../git/models/revision';
+import { isUncommitted } from '../git/utils/revision.utils';
 import {
 	showCommitNotFoundWarningMessage,
 	showFileNotUnderSourceControlWarningMessage,
 	showGenericErrorMessage,
 } from '../messages';
 import { getBestRepositoryOrShowPicker } from '../quickpicks/repositoryPicker';
+import { command, executeCommand } from '../system/-webview/command';
 import { createMarkdownCommandLink } from '../system/commands';
 import { Logger } from '../system/logger';
-import { command, executeCommand } from '../system/vscode/command';
-import type { CommandContext } from './base';
-import {
-	ActiveEditorCommand,
-	getCommandUri,
-	isCommandContextGitTimelineItem,
-	isCommandContextViewNodeHasCommit,
-} from './base';
+import { ActiveEditorCommand } from './commandBase';
+import { getCommandUri } from './commandBase.utils';
+import type { CommandContext } from './commandContext';
+import { isCommandContextGitTimelineItem, isCommandContextViewNodeHasCommit } from './commandContext.utils';
 import type { OpenOnRemoteCommandArgs } from './openOnRemote';
 
 export interface OpenCommitOnRemoteCommandArgs {
@@ -35,11 +32,11 @@ export class OpenCommitOnRemoteCommand extends ActiveEditorCommand {
 	static createMarkdownCommandLink(args: OpenCommitOnRemoteCommandArgs): string;
 	static createMarkdownCommandLink(argsOrSha: OpenCommitOnRemoteCommandArgs | string): string {
 		const args: OpenCommitOnRemoteCommandArgs = typeof argsOrSha === 'string' ? { sha: argsOrSha } : argsOrSha;
-		return createMarkdownCommandLink<OpenCommitOnRemoteCommandArgs>(Commands.OpenCommitOnRemote, args);
+		return createMarkdownCommandLink<OpenCommitOnRemoteCommandArgs>(GlCommand.OpenCommitOnRemote, args);
 	}
 
 	constructor(private readonly container: Container) {
-		super([Commands.OpenCommitOnRemote, Commands.Deprecated_OpenCommitInRemote, Commands.CopyRemoteCommitUrl]);
+		super([GlCommand.OpenCommitOnRemote, GlCommand.Deprecated_OpenCommitInRemote, GlCommand.CopyRemoteCommitUrl]);
 	}
 
 	protected override preExecute(context: CommandContext, args?: OpenCommitOnRemoteCommandArgs) {
@@ -61,7 +58,7 @@ export class OpenCommitOnRemoteCommand extends ActiveEditorCommand {
 			uri = context.uri;
 		}
 
-		if (context.command === Commands.CopyRemoteCommitUrl) {
+		if (context.command === GlCommand.CopyRemoteCommitUrl) {
 			args = { ...args, clipboard: true };
 		}
 
@@ -120,7 +117,7 @@ export class OpenCommitOnRemoteCommand extends ActiveEditorCommand {
 				return;
 			}
 
-			void (await executeCommand<OpenOnRemoteCommandArgs>(Commands.OpenOnRemote, {
+			void (await executeCommand<OpenOnRemoteCommandArgs>(GlCommand.OpenOnRemote, {
 				resource: {
 					type: RemoteResourceType.Commit,
 					sha: args.sha,

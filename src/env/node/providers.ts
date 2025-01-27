@@ -1,8 +1,7 @@
 import type { Container } from '../../container';
 import type { GitCommandOptions } from '../../git/commandOptions';
 import type { GitProvider } from '../../git/gitProvider';
-import type { IntegrationAuthenticationService } from '../../plus/integrations/authentication/integrationAuthentication';
-import { configuration } from '../../system/vscode/configuration';
+import { configuration } from '../../system/-webview/configuration';
 // import { GitHubGitProvider } from '../../plus/github/githubGitProvider';
 import { Git } from './git/git';
 import { LocalGitProvider } from './git/localGitProvider';
@@ -19,7 +18,7 @@ function ensureGit() {
 }
 
 export function git(options: GitCommandOptions, ...args: any[]): Promise<string | Buffer> {
-	return ensureGit().git(options, ...args);
+	return ensureGit().exec(options, ...args);
 }
 
 export function gitLogStreamTo(
@@ -32,10 +31,7 @@ export function gitLogStreamTo(
 	return ensureGit().logStreamTo(repoPath, sha, limit, options, ...args);
 }
 
-export async function getSupportedGitProviders(
-	container: Container,
-	authenticationService: IntegrationAuthenticationService,
-): Promise<GitProvider[]> {
+export async function getSupportedGitProviders(container: Container): Promise<GitProvider[]> {
 	const git = ensureGit();
 
 	const providers: GitProvider[] = [
@@ -49,7 +45,7 @@ export async function getSupportedGitProviders(
 				await import(
 					/* webpackChunkName: "integrations" */ '../../plus/integrations/providers/github/githubGitProvider'
 				)
-			).GitHubGitProvider(container, authenticationService),
+			).GitHubGitProvider(container),
 		);
 	}
 

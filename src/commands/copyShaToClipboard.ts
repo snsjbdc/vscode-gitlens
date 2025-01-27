@@ -1,22 +1,22 @@
 import type { TextEditor, Uri } from 'vscode';
 import { env } from 'vscode';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { GitUri } from '../git/gitUri';
-import { shortenRevision } from '../git/models/reference';
+import { shortenRevision } from '../git/utils/revision.utils';
 import { showGenericErrorMessage } from '../messages';
+import { command } from '../system/-webview/command';
+import { configuration } from '../system/-webview/configuration';
 import { first } from '../system/iterable';
 import { Logger } from '../system/logger';
-import { command } from '../system/vscode/command';
-import { configuration } from '../system/vscode/configuration';
-import type { CommandContext } from './base';
+import { ActiveEditorCommand } from './commandBase';
+import { getCommandUri } from './commandBase.utils';
+import type { CommandContext } from './commandContext';
 import {
-	ActiveEditorCommand,
-	getCommandUri,
 	isCommandContextViewNodeHasBranch,
 	isCommandContextViewNodeHasCommit,
 	isCommandContextViewNodeHasTag,
-} from './base';
+} from './commandContext.utils';
 
 export interface CopyShaToClipboardCommandArgs {
 	sha?: string;
@@ -25,7 +25,7 @@ export interface CopyShaToClipboardCommandArgs {
 @command()
 export class CopyShaToClipboardCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super(Commands.CopyShaToClipboard);
+		super(GlCommand.CopyShaToClipboard);
 	}
 
 	protected override preExecute(context: CommandContext, args?: CopyShaToClipboardCommandArgs) {
@@ -61,7 +61,7 @@ export class CopyShaToClipboardCommand extends ActiveEditorCommand {
 					const repoPath = this.container.git.getBestRepository(editor)?.path;
 					if (!repoPath) return;
 
-					const log = await this.container.git.getLog(repoPath, { limit: 1 });
+					const log = await this.container.git.commits(repoPath).getLog(undefined, { limit: 1 });
 					if (log == null) return;
 
 					args.sha = first(log.commits.values())?.sha;

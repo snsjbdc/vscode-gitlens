@@ -33,16 +33,16 @@ import type {
 import { viewsCommonConfigKeys, viewsConfigKeys } from '../config';
 import type { TreeViewCommandSuffixesByViewType } from '../constants.commands';
 import type { TrackedUsageFeatures } from '../constants.telemetry';
-import type { TreeViewIds, TreeViewTypes } from '../constants.views';
+import type { TreeViewIds, TreeViewTypes, WebviewViewTypes } from '../constants.views';
 import type { Container } from '../container';
+import { executeCoreCommand } from '../system/-webview/command';
+import { configuration } from '../system/-webview/configuration';
 import { debug, log } from '../system/decorators/log';
 import { once } from '../system/event';
 import { debounce } from '../system/function';
 import { Logger } from '../system/logger';
 import { getLogScope } from '../system/logger.scope';
 import { cancellable, isPromise } from '../system/promise';
-import { executeCoreCommand } from '../system/vscode/command';
-import { configuration } from '../system/vscode/configuration';
 import type { BranchesView } from './branchesView';
 import type { CommitsView } from './commitsView';
 import type { ContributorsView } from './contributorsView';
@@ -79,7 +79,7 @@ export type View =
 	| WorktreesView;
 
 // prettier-ignore
-type TreeViewByType = {
+export type TreeViewByType = {
 	[T in TreeViewTypes]: T extends 'branches'
 		? BranchesView
 		: T extends 'commits'
@@ -113,11 +113,28 @@ type TreeViewByType = {
 		: View;
 };
 
+// prettier-ignore
+export type WebviewViewByType = {
+	[T in WebviewViewTypes]: T extends 'commitDetails'
+		? CommitsView
+		: T extends 'graph'
+		? CommitsView
+		: T extends 'graphDetails'
+		? CommitsView
+		: T extends 'home'
+		? CommitsView
+		: T extends 'patchDetails'
+		? CommitsView
+		: T extends 'timeline'
+		? CommitsView
+		: View;
+};
+
 export type ViewsWithBranches = BranchesView | CommitsView | RemotesView | RepositoriesView | WorkspacesView;
 export type ViewsWithBranchesNode = BranchesView | RepositoriesView | WorkspacesView;
 export type ViewsWithCommits = Exclude<View, LineHistoryView | StashesView>;
-export type ViewsWithContributors = ContributorsView | RepositoriesView | WorkspacesView;
-export type ViewsWithContributorsNode = ContributorsView | RepositoriesView | WorkspacesView;
+export type ViewsWithContributors = ViewsWithCommits;
+export type ViewsWithContributorsNode = ViewsWithCommits;
 export type ViewsWithRemotes = RemotesView | RepositoriesView | WorkspacesView;
 export type ViewsWithRemotesNode = RemotesView | RepositoriesView | WorkspacesView;
 export type ViewsWithRepositories = RepositoriesView | WorkspacesView;
@@ -167,6 +184,11 @@ export abstract class ViewBase<
 		return types.includes(this.type as unknown as T[number]);
 	}
 
+	private _disposed: boolean = false;
+	get disposed(): boolean {
+		return this._disposed;
+	}
+
 	get id(): TreeViewIds<Type> {
 		return `gitlens.views.${this.type}`;
 	}
@@ -210,7 +232,9 @@ export abstract class ViewBase<
 		public readonly type: Type,
 		public readonly name: string,
 		private readonly trackingFeature: TrackedUsageFeatures,
+		public readonly grouped?: boolean,
 	) {
+		this.description = this.getViewDescription();
 		this.disposables.push(once(container.onReady)(this.onReady, this));
 
 		if (this.container.debugging || configuration.get('debug')) {
@@ -264,13 +288,18 @@ export abstract class ViewBase<
 	}
 
 	dispose() {
+		this._disposed = true;
 		this._nodeState?.dispose();
 		this._nodeState = undefined;
+		this.root?.dispose();
 		Disposable.from(...this.disposables).dispose();
 	}
 
 	private onReady() {
-		this.initialize({ canSelectMany: this.canSelectMany, showCollapseAll: this.showCollapseAll });
+		this.initialize({
+			canSelectMany: this.canSelectMany,
+			showCollapseAll: this.grouped ? false : this.showCollapseAll,
+		});
 		queueMicrotask(() => this.onConfigurationChanged());
 	}
 
@@ -299,8 +328,13 @@ export abstract class ViewBase<
 		if (!configuration.changed(e, 'views')) return false;
 
 		if (configuration.changed(e, `views.${this.configKey}` as const)) return true;
-		for (const key of viewsCommonConfigKeys) {
-			if (configuration.changed(e, `views.${key}` as const)) return true;
+		if (
+			configuration.changed(
+				e,
+				viewsCommonConfigKeys.map(k => `views.${k}` as const),
+			)
+		) {
+			return true;
 		}
 
 		return false;
@@ -361,7 +395,7 @@ export abstract class ViewBase<
 	}
 
 	protected initialize(options: { canSelectMany?: boolean; showCollapseAll?: boolean } = {}) {
-		this.tree = window.createTreeView<ViewNode>(this.id, {
+		this.tree = window.createTreeView<ViewNode>(this.grouped ? 'gitlens.views.scm.grouped' : this.id, {
 			...options,
 			treeDataProvider: this,
 		});
@@ -395,6 +429,7 @@ export abstract class ViewBase<
 
 	protected ensureRoot(force: boolean = false) {
 		if (this.root == null || force) {
+			this.root?.dispose();
 			this.root = this.getRoot();
 		}
 
@@ -431,6 +466,13 @@ export abstract class ViewBase<
 		return node.getTreeItem();
 	}
 
+	getViewDescription(count?: number) {
+		return (
+			`${this.grouped ? `${this.name.toLocaleLowerCase()} ` : ''}${count != null ? `(${count})` : ''}` ||
+			undefined
+		);
+	}
+
 	resolveTreeItem(item: TreeItem, node: ViewNode, token: CancellationToken): TreeItem | Promise<TreeItem> {
 		return node.resolveTreeItem?.(item, token) ?? item;
 	}
@@ -465,7 +507,7 @@ export abstract class ViewBase<
 
 	protected onVisibilityChanged(e: TreeViewVisibilityChangeEvent) {
 		if (e.visible) {
-			void this.container.usage.track(`${this.trackingFeature}:shown`);
+			void this.container.usage.track(`${this.trackingFeature}:shown`).catch();
 		}
 
 		this._onDidChangeVisibility.fire(e);
@@ -712,6 +754,7 @@ export abstract class ViewBase<
 			await this.tree.reveal(node, options);
 		} catch (ex) {
 			Logger.error(ex);
+			debugger;
 		}
 	}
 
@@ -720,7 +763,16 @@ export abstract class ViewBase<
 		const scope = getLogScope();
 
 		try {
-			void (await executeCoreCommand(`${this.id}.focus`, options));
+			const command = `${this.grouped ? 'gitlens.views.scm.grouped' : this.id}.focus` as const;
+			// If we haven't been initialized, the focus command will show the view, but won't focus it, so wait until it's initialized and then focus again
+			if (!this.initialized) {
+				void executeCoreCommand(command, options);
+				await new Promise<void>(resolve => {
+					void once(this._onDidInitialize.event)(() => resolve(), this);
+				});
+			}
+
+			void (await executeCoreCommand(command, options));
 		} catch (ex) {
 			Logger.error(ex, scope);
 		}

@@ -4,9 +4,9 @@ import { emojify } from '../../emojis';
 import type { GitUri } from '../../git/gitUri';
 import type { GitLog } from '../../git/models/log';
 import type { GitTagReference } from '../../git/models/reference';
-import { shortenRevision } from '../../git/models/reference';
 import type { GitTag } from '../../git/models/tag';
-import { gate } from '../../system/decorators/gate';
+import { shortenRevision } from '../../git/utils/revision.utils';
+import { gate } from '../../system/decorators/-webview/gate';
 import { debug } from '../../system/decorators/log';
 import { map } from '../../system/iterable';
 import { pad } from '../../system/string';
@@ -54,7 +54,7 @@ export class TagNode extends ViewRefNode<'tag', ViewsWithTags, GitTagReference> 
 		const log = await this.getLog();
 		if (log == null) return [new MessageNode(this.view, this, 'No commits could be found.')];
 
-		const getBranchAndTagTips = await this.view.container.git.getBranchesAndTagsTipsFn(
+		const getBranchAndTagTips = await this.view.container.git.getBranchesAndTagsTipsLookup(
 			this.uri.repoPath,
 			this.tag.name,
 		);
@@ -71,7 +71,7 @@ export class TagNode extends ViewRefNode<'tag', ViewsWithTags, GitTagReference> 
 		if (log.hasMore) {
 			children.push(
 				new LoadMoreNode(this.view, this, children[children.length - 1], {
-					getCount: () => this.view.container.git.getCommitCount(this.tag.repoPath, this.tag.name),
+					getCount: () => this.view.container.git.commits(this.tag.repoPath).getCommitCount(this.tag.name),
 				}),
 			);
 		}
@@ -113,10 +113,9 @@ export class TagNode extends ViewRefNode<'tag', ViewsWithTags, GitTagReference> 
 	private _log: GitLog | undefined;
 	private async getLog() {
 		if (this._log == null) {
-			this._log = await this.view.container.git.getLog(this.uri.repoPath!, {
-				limit: this.limit ?? this.view.config.defaultItemLimit,
-				ref: this.tag.name,
-			});
+			this._log = await this.view.container.git
+				.commits(this.uri.repoPath!)
+				.getLog(this.tag.name, { limit: this.limit ?? this.view.config.defaultItemLimit });
 		}
 
 		return this._log;

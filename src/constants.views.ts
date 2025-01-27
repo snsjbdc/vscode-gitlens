@@ -7,6 +7,7 @@ export type TreeViewTypes =
 	| 'contributors'
 	| 'drafts'
 	| 'fileHistory'
+	| 'scm.grouped'
 	| 'launchpad'
 	| 'lineHistory'
 	| 'pullRequest'
@@ -18,8 +19,24 @@ export type TreeViewTypes =
 	| 'workspaces'
 	| 'worktrees';
 export type TreeViewIds<T extends TreeViewTypes = TreeViewTypes> = `gitlens.views.${T}`;
+export type TreeViewTypeFromId<T extends TreeViewIds> = T extends `gitlens.views.${infer U}` ? U : never;
 
-export type WebviewTypes = 'graph' | 'patchDetails' | 'settings' | 'timeline' | 'welcome';
+export type GroupableTreeViewTypes = Extract<
+	TreeViewTypes,
+	| 'branches'
+	| 'commits'
+	| 'contributors'
+	| 'launchpad'
+	| 'remotes'
+	| 'repositories'
+	| 'searchAndCompare'
+	| 'stashes'
+	| 'tags'
+	| 'worktrees'
+>;
+export type GroupableTreeViewIds<T extends GroupableTreeViewTypes = GroupableTreeViewTypes> = TreeViewIds<T>;
+
+export type WebviewTypes = 'graph' | 'patchDetails' | 'settings' | 'timeline';
 export type WebviewIds = `gitlens.${WebviewTypes}`;
 
 export type WebviewViewTypes = 'commitDetails' | 'graph' | 'graphDetails' | 'home' | 'patchDetails' | 'timeline';
@@ -77,6 +94,7 @@ export type TreeViewFileNodeTypes =
 	| 'status-file'
 	| 'uncommitted-file';
 export type TreeViewSubscribableNodeTypes =
+	| 'commits-current-branch'
 	| 'compare-branch'
 	| 'compare-results'
 	| 'file-history'
@@ -108,11 +126,10 @@ export type TreeViewNodeTypes =
 	| 'grouping'
 	| 'launchpad'
 	| 'launchpad-item'
-	| 'merge-status'
 	| 'message'
 	| 'pager'
+	| 'paused-operation-status'
 	| 'pullrequest'
-	| 'rebase-status'
 	| 'reflog'
 	| 'reflog-record'
 	| 'remote'

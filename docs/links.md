@@ -226,7 +226,7 @@ _{prefix}/workspace/{workspaceId}_
 
 #### Example Usage
 
-Right click a cloud workspace in the _GK Workspaces_ view and choose "Share -> Copy Link to Workspace". Use this link to open the view to the chosen workspace in GitLens.
+Right click a cloud workspace in the _Cloud Workspaces_ view and choose "Share -> Copy Link to Workspace". Use this link to open the view to the chosen workspace in GitLens.
 
 ## GitKraken Account Links
 
@@ -273,6 +273,8 @@ _{prefix}/command/{command}_
   - _cloud-patches_ - Runs the `GitLens: Show Cloud Patches View` command.
 
   - _graph_ - Runs the `GitLens: Show Graph` command.
+
+  - _home_ - Runs the `GitLens: Show Home View` command.
 
   - _inspect_ - Runs the `GitLens: Inspect Commit Details` command.
 

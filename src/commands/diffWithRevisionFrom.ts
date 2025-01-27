@@ -1,16 +1,18 @@
 import type { TextDocumentShowOptions, TextEditor, Uri } from 'vscode';
 import { GlyphChars, quickPickTitleMaxChars } from '../constants';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { GitUri } from '../git/gitUri';
-import { isBranchReference, shortenRevision } from '../git/models/reference';
+import { isBranchReference } from '../git/utils/reference.utils';
+import { shortenRevision } from '../git/utils/revision.utils';
 import { showNoRepositoryWarningMessage } from '../messages';
 import { showStashPicker } from '../quickpicks/commitPicker';
 import { showReferencePicker } from '../quickpicks/referencePicker';
+import { command, executeCommand } from '../system/-webview/command';
 import { basename } from '../system/path';
 import { pad } from '../system/string';
-import { command, executeCommand } from '../system/vscode/command';
-import { ActiveEditorCommand, getCommandUri } from './base';
+import { ActiveEditorCommand } from './commandBase';
+import { getCommandUri } from './commandBase.utils';
 import type { DiffWithCommandArgs } from './diffWith';
 
 export interface DiffWithRevisionFromCommandArgs {
@@ -22,7 +24,7 @@ export interface DiffWithRevisionFromCommandArgs {
 @command()
 export class DiffWithRevisionFromCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super(Commands.DiffWithRevisionFrom);
+		super(GlCommand.DiffWithRevisionFrom);
 	}
 
 	async execute(editor?: TextEditor, uri?: Uri, args?: DiffWithRevisionFromCommandArgs) {
@@ -48,7 +50,7 @@ export class DiffWithRevisionFromCommand extends ActiveEditorCommand {
 		if (args?.stash) {
 			const title = `Open Changes with Stash${pad(GlyphChars.Dot, 2, 2)}`;
 			const pick = await showStashPicker(
-				this.container.git.getStash(gitUri.repoPath),
+				this.container.git.stash(gitUri.repoPath)?.getStash(),
 				`${title}${gitUri.getFormattedFileName({ truncateTo: quickPickTitleMaxChars - title.length })}`,
 				'Choose a stash to compare with',
 				{
@@ -92,7 +94,7 @@ export class DiffWithRevisionFromCommand extends ActiveEditorCommand {
 			}
 		}
 
-		void (await executeCommand<DiffWithCommandArgs>(Commands.DiffWith, {
+		void (await executeCommand<DiffWithCommandArgs>(GlCommand.DiffWith, {
 			repoPath: gitUri.repoPath,
 			lhs: {
 				sha: sha,

@@ -1,5 +1,5 @@
 import type { Endpoints } from '@octokit/types';
-import { GitFileIndexStatus } from '../../../../git/models/file';
+import { GitFileIndexStatus } from '../../../../git/models/fileStatus';
 import type { IssueLabel } from '../../../../git/models/issue';
 import { Issue, RepositoryAccessLevel } from '../../../../git/models/issue';
 import type { PullRequestState } from '../../../../git/models/pullRequest';
@@ -103,6 +103,7 @@ export interface GitHubPullRequestLite extends Omit<GitHubIssueOrPullRequest, '_
 	};
 
 	isCrossRepository: boolean;
+	isDraft: boolean;
 	mergedAt: string | null;
 	permalink: string;
 
@@ -133,7 +134,9 @@ export interface GitHubIssue extends Omit<GitHubIssueOrPullRequest, '__typename'
 			login: string;
 		};
 		viewerPermission: GitHubViewerPermission;
+		url: string;
 	};
+	body: string;
 }
 
 export type GitHubPullRequestReviewDecision = 'CHANGES_REQUESTED' | 'APPROVED' | 'REVIEW_REQUIRED';
@@ -148,7 +151,6 @@ export interface GitHubPullRequest extends GitHubPullRequestLite {
 	};
 	checksUrl: string;
 	deletions: number;
-	isDraft: boolean;
 	mergeable: GitHubPullRequestMergeableState;
 	reviewDecision: GitHubPullRequestReviewDecision;
 	latestReviews: {
@@ -163,9 +165,15 @@ export interface GitHubPullRequest extends GitHubPullRequestLite {
 			requestedReviewer: GitHubMember | null;
 		}[];
 	};
-	statusCheckRollup: {
-		state: 'SUCCESS' | 'FAILURE' | 'PENDING' | 'EXPECTED' | 'ERROR';
-	} | null;
+	commits: {
+		nodes: {
+			commit: {
+				statusCheckRollup: {
+					state: 'SUCCESS' | 'FAILURE' | 'PENDING' | 'EXPECTED' | 'ERROR';
+				} | null;
+			};
+		}[];
+	};
 	totalCommentsCount: number;
 	viewerCanUpdate: boolean;
 }
@@ -214,6 +222,7 @@ export function fromGitHubPullRequestLite(pr: GitHubPullRequestLite, provider: P
 			},
 			isCrossRepository: pr.isCrossRepository,
 		},
+		pr.isDraft,
 	);
 }
 
@@ -390,7 +399,7 @@ export function fromGitHubPullRequest(pr: GitHubPullRequest, provider: Provider)
 			avatarUrl: r.avatarUrl,
 			url: r.url,
 		})),
-		fromGitHubPullRequestStatusCheckRollupState(pr.statusCheckRollup?.state),
+		fromGitHubPullRequestStatusCheckRollupState(pr.commits.nodes?.[0]?.commit.statusCheckRollup?.state),
 	);
 }
 
@@ -416,17 +425,18 @@ export function fromGitHubIssue(value: GitHubIssue, provider: Provider): Issue {
 			avatarUrl: value.author.avatarUrl,
 			url: value.author.url,
 		},
-		{
-			owner: value.repository.owner.login,
-			repo: value.repository.name,
-			accessLevel: fromGitHubViewerPermissionToAccessLevel(value.repository.viewerPermission),
-		},
 		value.assignees.nodes.map(assignee => ({
 			id: assignee.login,
 			name: assignee.login,
 			avatarUrl: assignee.avatarUrl,
 			url: assignee.url,
 		})),
+		{
+			owner: value.repository.owner.login,
+			repo: value.repository.name,
+			accessLevel: fromGitHubViewerPermissionToAccessLevel(value.repository.viewerPermission),
+			url: value.repository.url,
+		},
 		value.closedAt == null ? undefined : new Date(value.closedAt),
 		value.labels?.nodes == null
 			? undefined
@@ -436,6 +446,7 @@ export function fromGitHubIssue(value: GitHubIssue, provider: Provider): Issue {
 			  })),
 		value.comments?.totalCount,
 		value.reactions?.totalCount,
+		value.body,
 	);
 }
 

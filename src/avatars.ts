@@ -1,15 +1,15 @@
-import { md5 } from '@env/crypto';
 import { EventEmitter, Uri } from 'vscode';
+import { md5 } from '@env/crypto';
 import type { GravatarDefaultStyle } from './config';
 import type { StoredAvatar } from './constants.storage';
 import { Container } from './container';
 import type { CommitAuthor } from './git/models/author';
 import { getGitHubNoReplyAddressParts } from './git/remotes/github';
+import { configuration } from './system/-webview/configuration';
+import { getContext } from './system/-webview/context';
 import { debounce } from './system/function';
 import { filterMap } from './system/iterable';
 import { base64, equalsIgnoreCase } from './system/string';
-import { configuration } from './system/vscode/configuration';
-import { getContext } from './system/vscode/context';
 import type { ContactPresenceStatus } from './vsls/vsls';
 
 const maxSmallIntegerV8 = 2 ** 30 - 1; // Max number that can be stored in V8's smis (small integers)
@@ -36,7 +36,7 @@ _onDidFetchAvatar.event(
 						),
 				  ]
 				: undefined;
-		void Container.instance.storage.store('avatars', avatars);
+		void Container.instance.storage.store('avatars', avatars).catch();
 	}, 1000),
 );
 
@@ -227,7 +227,9 @@ async function getAvatarUriFromRemoteProvider(
 		// 	account = await remote?.provider.getAccountForEmail(email, { avatarSize: size });
 		// } else {
 		if (typeof repoPathOrCommit !== 'string') {
-			const remote = await Container.instance.git.getBestRemoteWithIntegration(repoPathOrCommit.repoPath);
+			const remote = await Container.instance.git
+				.remotes(repoPathOrCommit.repoPath)
+				.getBestRemoteWithIntegration();
 			if (remote?.hasIntegration()) {
 				account = await (
 					await remote.getIntegration()

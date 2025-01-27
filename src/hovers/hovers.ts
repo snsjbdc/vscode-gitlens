@@ -8,14 +8,14 @@ import type { Container } from '../container';
 import { CommitFormatter } from '../git/formatters/commitFormatter';
 import { GitUri } from '../git/gitUri';
 import type { GitCommit } from '../git/models/commit';
-import { uncommittedStaged } from '../git/models/constants';
 import type { GitDiffHunk, GitDiffLine } from '../git/models/diff';
 import type { PullRequest } from '../git/models/pullRequest';
-import { isUncommittedStaged, shortenRevision } from '../git/models/reference';
 import type { GitRemote } from '../git/models/remote';
+import { uncommittedStaged } from '../git/models/revision';
 import type { RemoteProvider } from '../git/remotes/remoteProvider';
+import { isUncommittedStaged, shortenRevision } from '../git/utils/revision.utils';
+import { configuration } from '../system/-webview/configuration';
 import { getSettledValue, pauseOnCancelOrTimeout, pauseOnCancelOrTimeoutMapTuplePromise } from '../system/promise';
-import { configuration } from '../system/vscode/configuration';
 
 export async function changesMessage(
 	container: Container,
@@ -212,7 +212,7 @@ export async function detailsMessage(
 	}>,
 ): Promise<MarkdownString | undefined> {
 	const remotesResult = await pauseOnCancelOrTimeout(
-		options?.remotes ?? container.git.getBestRemotesWithProviders(commit.repoPath),
+		options?.remotes ?? container.git.remotes(commit.repoPath).getBestRemotesWithProviders(),
 		options?.cancellation,
 		options?.timeout,
 	);

@@ -38,6 +38,12 @@ export function* chunkByStringLength(source: string[], maxLength: number): Itera
 	}
 }
 
+export function* concat<T>(...sources: (Iterable<T> | IterableIterator<T>)[]): Iterable<T> {
+	for (const source of sources) {
+		yield* source;
+	}
+}
+
 export function count<T>(
 	source: Iterable<T> | IterableIterator<T> | undefined,
 	predicate?: (item: T) => boolean,

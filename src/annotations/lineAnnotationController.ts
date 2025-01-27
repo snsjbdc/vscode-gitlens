@@ -5,6 +5,8 @@ import type { Container } from '../container';
 import { CommitFormatter } from '../git/formatters/commitFormatter';
 import type { PullRequest } from '../git/models/pullRequest';
 import { detailsMessage } from '../hovers/hovers';
+import { configuration } from '../system/-webview/configuration';
+import { isTrackableTextEditor } from '../system/-webview/vscode';
 import { debug, log } from '../system/decorators/log';
 import { once } from '../system/event';
 import { debounce } from '../system/function';
@@ -12,8 +14,6 @@ import { Logger } from '../system/logger';
 import { getLogScope, setLogScopeExit } from '../system/logger.scope';
 import type { MaybePausedResult } from '../system/promise';
 import { getSettledValue, pauseOnCancelOrTimeoutMap } from '../system/promise';
-import { configuration } from '../system/vscode/configuration';
-import { isTrackableTextEditor } from '../system/vscode/utils';
 import type { LinesChangeEvent, LineState } from '../trackers/lineTracker';
 import { getInlineDecoration } from './annotations';
 import type { BlameFontOptions } from './gutterBlameAnnotationProvider';
@@ -157,7 +157,7 @@ export class LineAnnotationController implements Disposable {
 		const prs = new Map<string, Promise<PullRequest | undefined>>();
 		if (lines.size === 0) return prs;
 
-		const remotePromise = this.container.git.getBestRemoteWithIntegration(repoPath);
+		const remotePromise = this.container.git.remotes(repoPath).getBestRemoteWithIntegration();
 
 		for (const [, state] of lines) {
 			if (state.commit.isUncommitted) continue;
@@ -288,7 +288,7 @@ export class LineAnnotationController implements Disposable {
 		const cancellation = this._cancellation.token;
 
 		const getBranchAndTagTipsPromise = CommitFormatter.has(cfg.format, 'tips')
-			? this.container.git.getBranchesAndTagsTipsFn(repoPath)
+			? this.container.git.getBranchesAndTagsTipsLookup(repoPath)
 			: undefined;
 
 		async function updateDecorations(

@@ -3,7 +3,7 @@ import type { TreeViewFileNodeTypes } from '../../../constants.views';
 import { StatusFileFormatter } from '../../../git/formatters/statusFormatter';
 import type { GitUri } from '../../../git/gitUri';
 import type { GitFile } from '../../../git/models/file';
-import type { GitStatusFile } from '../../../git/models/status';
+import type { GitStatusFile } from '../../../git/models/statusFile';
 import type { View } from '../../viewBase';
 import { ViewNode } from './viewNode';
 
@@ -41,9 +41,7 @@ export function getFileTooltip(
 	outputFormat?: 'markdown' | 'plaintext',
 ) {
 	return StatusFileFormatter.fromTemplate(
-		`\${status${
-			suffix ? `' ${suffix}'` : ''
-		}} $(file) \${filePath}\${  ←  originalPath}\${'\\\n \u2022 'changesDetail}`,
+		`\${status${suffix ? `' ${suffix}'` : ''}} $(file) \${filePath}\${  ←  originalPath}\${'\\\n'changesDetail}`,
 		file,
 		{
 			outputFormat: outputFormat ?? 'markdown',
@@ -52,5 +50,8 @@ export function getFileTooltip(
 }
 
 export function getFileTooltipMarkdown(file: GitFile | GitStatusFile, suffix?: string) {
-	return new MarkdownString(getFileTooltip(file, suffix, 'markdown'), true);
+	const tooltip = new MarkdownString(getFileTooltip(file, suffix, 'markdown'), true);
+	tooltip.supportHtml = true;
+	tooltip.isTrusted = true;
+	return tooltip;
 }

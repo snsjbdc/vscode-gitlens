@@ -1,6 +1,7 @@
 import type { Disposable } from 'vscode';
-import type { CommandCallback } from '../system/vscode/command';
-import { registerWebviewCommand } from '../system/vscode/command';
+import type { Commands } from '../constants.commands';
+import type { CommandCallback } from '../system/-webview/command';
+import { registerWebviewCommand } from '../system/-webview/command';
 import type { WebviewContext } from '../system/webview';
 import { isWebviewContext } from '../system/webview';
 import type { WebviewProvider } from './webviewProvider';
@@ -20,7 +21,7 @@ export class WebviewCommandRegistrar implements Disposable {
 		provider: T,
 		id: string,
 		instanceId: string | undefined,
-		command: string,
+		command: Commands,
 		callback: CommandCallback,
 	) {
 		let registration = this._commandRegistrations.get(command);

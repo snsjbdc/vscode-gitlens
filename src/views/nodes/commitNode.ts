@@ -2,7 +2,7 @@ import type { CancellationToken, Command } from 'vscode';
 import { MarkdownString, ThemeColor, ThemeIcon, TreeItem, TreeItemCollapsibleState } from 'vscode';
 import type { DiffWithPreviousCommandArgs } from '../../commands/diffWithPrevious';
 import type { Colors } from '../../constants.colors';
-import { Commands } from '../../constants.commands';
+import { GlCommand } from '../../constants.commands';
 import { CommitFormatter } from '../../git/formatters/commitFormatter';
 import type { GitBranch } from '../../git/models/branch';
 import type { GitCommit } from '../../git/models/commit';
@@ -10,13 +10,13 @@ import type { PullRequest } from '../../git/models/pullRequest';
 import type { GitRevisionReference } from '../../git/models/reference';
 import type { GitRemote } from '../../git/models/remote';
 import type { RemoteProvider } from '../../git/remotes/remoteProvider';
+import { configuration } from '../../system/-webview/configuration';
+import { getContext } from '../../system/-webview/context';
 import { makeHierarchical } from '../../system/array';
 import { joinPaths, normalizePath } from '../../system/path';
 import type { Deferred } from '../../system/promise';
 import { defer, getSettledValue, pauseOnCancelOrTimeoutMapTuplePromise } from '../../system/promise';
 import { sortCompare } from '../../system/string';
-import { configuration } from '../../system/vscode/configuration';
-import { getContext } from '../../system/vscode/context';
 import type { FileHistoryView } from '../fileHistoryView';
 import type { ViewsWithCommits } from '../viewBase';
 import { disposeChildren } from '../viewBase';
@@ -129,7 +129,7 @@ export class CommitNode extends ViewRefNode<'commit', ViewsWithCommits | FileHis
 				}
 			}
 
-			const commits = await commit.getCommitsForFiles();
+			const commits = await commit.getCommitsForFiles({ include: { stats: true } });
 			for (const c of commits) {
 				children.push(new CommitFileNode(this.view, this, c.file!, c));
 			}
@@ -208,7 +208,7 @@ export class CommitNode extends ViewRefNode<'commit', ViewsWithCommits | FileHis
 		};
 		return {
 			title: 'Open Changes with Previous Revision',
-			command: Commands.DiffWithPrevious,
+			command: GlCommand.DiffWithPrevious,
 			arguments: [undefined, commandArgs],
 		};
 	}
@@ -253,8 +253,8 @@ export class CommitNode extends ViewRefNode<'commit', ViewsWithCommits | FileHis
 
 	private async getTooltip(cancellation: CancellationToken) {
 		const [remotesResult, _] = await Promise.allSettled([
-			this.view.container.git.getBestRemotesWithProviders(this.commit.repoPath, cancellation),
-			this.commit.message == null ? this.commit.ensureFullDetails() : undefined,
+			this.view.container.git.remotes(this.commit.repoPath).getBestRemotesWithProviders(cancellation),
+			this.commit.ensureFullDetails({ include: { stats: true } }),
 		]);
 
 		if (cancellation.isCancellationRequested) return undefined;

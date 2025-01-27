@@ -1,11 +1,11 @@
 import { env, window } from 'vscode';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
-import { shortenRevision } from '../git/models/reference';
-import { command } from '../system/vscode/command';
-import { openUrl } from '../system/vscode/utils';
-import type { CommandContext } from './base';
-import { Command } from './base';
+import { shortenRevision } from '../git/utils/revision.utils';
+import { command } from '../system/-webview/command';
+import { openUrl } from '../system/-webview/vscode';
+import { GlCommandBase } from './commandBase';
+import type { CommandContext } from './commandContext';
 
 export interface OpenPullRequestOnRemoteCommandArgs {
 	clipboard?: boolean;
@@ -15,9 +15,9 @@ export interface OpenPullRequestOnRemoteCommandArgs {
 }
 
 @command()
-export class OpenPullRequestOnRemoteCommand extends Command {
+export class OpenPullRequestOnRemoteCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super([Commands.OpenPullRequestOnRemote, Commands.CopyRemotePullRequestUrl]);
+		super([GlCommand.OpenPullRequestOnRemote, GlCommand.CopyRemotePullRequestUrl]);
 	}
 
 	protected override preExecute(context: CommandContext, args?: OpenPullRequestOnRemoteCommandArgs) {
@@ -25,7 +25,7 @@ export class OpenPullRequestOnRemoteCommand extends Command {
 			args = {
 				...args,
 				pr: context.node.pullRequest != null ? { url: context.node.pullRequest.url } : undefined,
-				clipboard: context.command === Commands.CopyRemotePullRequestUrl,
+				clipboard: context.command === GlCommand.CopyRemotePullRequestUrl,
 			};
 		}
 
@@ -36,7 +36,7 @@ export class OpenPullRequestOnRemoteCommand extends Command {
 		if (args?.pr == null) {
 			if (args?.repoPath == null || args?.ref == null) return;
 
-			const remote = await this.container.git.getBestRemoteWithIntegration(args.repoPath);
+			const remote = await this.container.git.remotes(args.repoPath).getBestRemoteWithIntegration();
 			if (remote == null) return;
 
 			const provider = await this.container.integrations.getByRemote(remote);

@@ -1,14 +1,16 @@
 import type { TextEditor, Uri } from 'vscode';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { GitUri } from '../git/gitUri';
 import { RemoteResourceType } from '../git/models/remoteResource';
 import { showGenericErrorMessage } from '../messages';
 import { getBestRepositoryOrShowPicker } from '../quickpicks/repositoryPicker';
+import { command, executeCommand } from '../system/-webview/command';
 import { Logger } from '../system/logger';
-import { command, executeCommand } from '../system/vscode/command';
-import type { CommandContext } from './base';
-import { ActiveEditorCommand, getCommandUri, isCommandContextViewNodeHasRemote } from './base';
+import { ActiveEditorCommand } from './commandBase';
+import { getCommandUri } from './commandBase.utils';
+import type { CommandContext } from './commandContext';
+import { isCommandContextViewNodeHasRemote } from './commandContext.utils';
 import type { OpenOnRemoteCommandArgs } from './openOnRemote';
 
 export interface OpenBranchesOnRemoteCommandArgs {
@@ -20,9 +22,9 @@ export interface OpenBranchesOnRemoteCommandArgs {
 export class OpenBranchesOnRemoteCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
 		super([
-			Commands.OpenBranchesOnRemote,
-			Commands.Deprecated_OpenBranchesInRemote,
-			Commands.CopyRemoteBranchesUrl,
+			GlCommand.OpenBranchesOnRemote,
+			GlCommand.Deprecated_OpenBranchesInRemote,
+			GlCommand.CopyRemoteBranchesUrl,
 		]);
 	}
 
@@ -31,7 +33,7 @@ export class OpenBranchesOnRemoteCommand extends ActiveEditorCommand {
 			args = { ...args, remote: context.node.remote.name };
 		}
 
-		if (context.command === Commands.CopyRemoteBranchesUrl) {
+		if (context.command === GlCommand.CopyRemoteBranchesUrl) {
 			args = { ...args, clipboard: true };
 		}
 
@@ -53,7 +55,7 @@ export class OpenBranchesOnRemoteCommand extends ActiveEditorCommand {
 		if (!repoPath) return;
 
 		try {
-			void (await executeCommand<OpenOnRemoteCommandArgs>(Commands.OpenOnRemote, {
+			void (await executeCommand<OpenOnRemoteCommandArgs>(GlCommand.OpenOnRemote, {
 				resource: {
 					type: RemoteResourceType.Branches,
 				},

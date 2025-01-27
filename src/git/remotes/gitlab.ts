@@ -1,17 +1,17 @@
 import type { Range, Uri } from 'vscode';
 import type { Autolink, AutolinkReference, DynamicAutolinkReference, MaybeEnrichedAutolink } from '../../autolinks';
 import { GlyphChars } from '../../constants';
-import type { GkProviderId } from '../../gk/models/repositoryIdentities';
 import type { GitLabRepositoryDescriptor } from '../../plus/integrations/providers/gitlab';
 import type { Brand, Unbrand } from '../../system/brand';
 import { fromNow } from '../../system/date';
-import { memoize } from '../../system/decorators/memoize';
+import { memoize } from '../../system/decorators/-webview/memoize';
 import { encodeUrl } from '../../system/encoding';
 import { escapeMarkdown, unescapeMarkdown } from '../../system/markdown';
 import { equalsIgnoreCase } from '../../system/string';
-import { getIssueOrPullRequestMarkdownIcon } from '../models/issue';
-import { isSha } from '../models/reference';
 import type { Repository } from '../models/repository';
+import type { GkProviderId } from '../models/repositoryIdentities';
+import { getIssueOrPullRequestMarkdownIcon } from '../utils/-webview/icons';
+import { isSha } from '../utils/revision.utils';
 import type { RemoteProviderId } from './remoteProvider';
 import { RemoteProvider } from './remoteProvider';
 
@@ -33,13 +33,18 @@ export class GitLabRemote extends RemoteProvider<GitLabRepositoryDescriptor> {
 		return this.custom ? `${this.protocol}://${this.domain}/api` : `https://${this.domain}/api`;
 	}
 
+	protected override get issueLinkPattern(): string {
+		return `${this.baseUrl}/-/issues/<num>`;
+	}
+
 	private _autolinks: (AutolinkReference | DynamicAutolinkReference)[] | undefined;
 	override get autolinks(): (AutolinkReference | DynamicAutolinkReference)[] {
 		if (this._autolinks === undefined) {
 			this._autolinks = [
+				...super.autolinks,
 				{
 					prefix: '#',
-					url: `${this.baseUrl}/-/issues/<num>`,
+					url: this.issueLinkPattern,
 					alphanumeric: false,
 					ignoreCase: false,
 					title: `Open Issue #<num> on ${this.name}`,
@@ -335,7 +340,7 @@ export class GitLabRemote extends RemoteProvider<GitLabRepositoryDescriptor> {
 		} while (index > 0);
 
 		if (possibleBranches.size !== 0) {
-			const { values: branches } = await repository.git.getBranches({
+			const { values: branches } = await repository.git.branches().getBranches({
 				filter: b => b.remote && possibleBranches.has(b.getNameWithoutRemote()),
 			});
 			for (const branch of branches) {

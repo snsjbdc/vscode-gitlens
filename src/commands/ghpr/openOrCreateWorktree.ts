@@ -1,18 +1,18 @@
 import type { Uri } from 'vscode';
 import { window } from 'vscode';
-import { Commands } from '../../constants.commands';
+import { GlCommand } from '../../constants.commands';
 import type { Container } from '../../container';
 import { create as createWorktree, open as openWorktree } from '../../git/actions/worktree';
-import { getLocalBranchByUpstream } from '../../git/models/branch';
 import type { GitBranchReference } from '../../git/models/reference';
-import { createReference, getReferenceFromBranch } from '../../git/models/reference';
 import type { GitRemote } from '../../git/models/remote';
-import { getWorktreeForBranch } from '../../git/models/worktree';
 import { parseGitRemoteUrl } from '../../git/parsers/remoteParser';
+import { getReferenceFromBranch } from '../../git/utils/-webview/reference.utils';
+import { getWorktreeForBranch } from '../../git/utils/-webview/worktree.utils';
+import { createReference } from '../../git/utils/reference.utils';
+import { command } from '../../system/-webview/command';
 import { Logger } from '../../system/logger';
 import { waitUntilNextTick } from '../../system/promise';
-import { command } from '../../system/vscode/command';
-import { Command } from '../base';
+import { GlCommandBase } from '../commandBase';
 
 interface GHPRPullRequestNode {
 	readonly pullRequestModel: GHPRPullRequest;
@@ -45,9 +45,9 @@ export interface GHPRPullRequest {
 }
 
 @command()
-export class OpenOrCreateWorktreeCommand extends Command {
+export class OpenOrCreateWorktreeCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super(Commands.OpenOrCreateWorktreeForGHPR);
+		super(GlCommand.OpenOrCreateWorktreeForGHPR);
 	}
 
 	async execute(...args: [GHPRPullRequestNode | GHPRPullRequest, ...unknown[]]) {
@@ -86,7 +86,7 @@ export class OpenOrCreateWorktreeCommand extends Command {
 		const remoteUrl = remoteUri.toString();
 		const [, remoteDomain, remotePath] = parseGitRemoteUrl(remoteUrl);
 
-		const remotes = await repo.git.getRemotes({ filter: r => r.matches(remoteDomain, remotePath) });
+		const remotes = await repo.git.remotes().getRemotes({ filter: r => r.matches(remoteDomain, remotePath) });
 		const remote = remotes[0] as GitRemote | undefined;
 
 		let addRemote: { name: string; url: string } | undefined;
@@ -113,7 +113,7 @@ export class OpenOrCreateWorktreeCommand extends Command {
 		let branchRef: GitBranchReference;
 		let createBranch: string | undefined;
 
-		const localBranch = await getLocalBranchByUpstream(repo, remoteBranchName);
+		const localBranch = await repo.git.branches().getLocalBranchByUpstream?.(remoteBranchName);
 		if (localBranch != null) {
 			branchRef = getReferenceFromBranch(localBranch);
 			// TODO@eamodio check if we are behind and if so ask the user to fast-forward

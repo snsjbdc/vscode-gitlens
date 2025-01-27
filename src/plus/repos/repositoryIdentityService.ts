@@ -3,13 +3,13 @@ import { Uri, window } from 'vscode';
 import type { Container } from '../../container';
 import { RemoteResourceType } from '../../git/models/remoteResource';
 import type { Repository } from '../../git/models/repository';
-import { parseGitRemoteUrl } from '../../git/parsers/remoteParser';
 import type {
 	GkProviderId,
 	RepositoryIdentityDescriptor,
 	RepositoryIdentityProviderDescriptor,
-} from '../../gk/models/repositoryIdentities';
-import { missingRepositoryId } from '../../gk/models/repositoryIdentities';
+} from '../../git/models/repositoryIdentities';
+import { missingRepositoryId } from '../../git/models/repositoryIdentities';
+import { parseGitRemoteUrl } from '../../git/parsers/remoteParser';
 import { log } from '../../system/decorators/log';
 import { getSettledValue } from '../../system/promise';
 import type { ServerConnection } from '../gk/serverConnection';
@@ -34,8 +34,8 @@ export class RepositoryIdentityService implements Disposable {
 		repository: Repository,
 	): Promise<RepositoryIdentityDescriptor<T>> {
 		const [bestRemotePromise, initialCommitShaPromise] = await Promise.allSettled([
-			this.container.git.getBestRemoteWithProvider(repository.uri),
-			this.container.git.getFirstCommitSha(repository.uri),
+			repository.git.remotes().getBestRemoteWithProvider(),
+			repository.git.commits().getInitialCommitSha?.(),
 		]);
 		const bestRemote = getSettledValue(bestRemotePromise);
 
@@ -100,7 +100,7 @@ export class RepositoryIdentityService implements Disposable {
 			// As a fallback, try to match using the repo id.
 			for (const repo of this.container.git.repositories) {
 				if (remoteDomain != null && remotePath != null) {
-					const matchingRemotes = await repo.git.getRemotes({
+					const matchingRemotes = await repo.git.remotes().getRemotes({
 						filter: r => r.matches(remoteDomain, remotePath),
 					});
 					if (matchingRemotes.length > 0) {
@@ -169,7 +169,7 @@ export class RepositoryIdentityService implements Disposable {
 
 		const [identityResult, remotesResult] = await Promise.allSettled([
 			identity == null ? this.getRepositoryIdentity<T>(repo) : undefined,
-			repo.git.getRemotes(),
+			repo.git.remotes().getRemotes(),
 		]);
 
 		identity ??= getSettledValue(identityResult);

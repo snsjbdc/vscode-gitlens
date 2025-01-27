@@ -2,17 +2,18 @@ import type { Selection } from 'vscode';
 import { TreeItem, TreeItemCollapsibleState, window } from 'vscode';
 import type { GitCommitish } from '../../git/gitUri';
 import { GitUri, unknownGitUri } from '../../git/gitUri';
-import { deletedOrMissing } from '../../git/models/constants';
-import { isBranchReference, isSha } from '../../git/models/reference';
+import { deletedOrMissing } from '../../git/models/revision';
+import { isBranchReference } from '../../git/utils/reference.utils';
+import { isSha } from '../../git/utils/revision.utils';
 import { showReferencePicker } from '../../quickpicks/referencePicker';
+import { setContext } from '../../system/-webview/context';
 import { UriComparer } from '../../system/comparers';
-import { gate } from '../../system/decorators/gate';
+import { gate } from '../../system/decorators/-webview/gate';
 import { debug, log } from '../../system/decorators/log';
 import { weakEvent } from '../../system/event';
 import { debounce } from '../../system/function';
 import { Logger } from '../../system/logger';
 import { getLogScope, setLogScopeExit } from '../../system/logger.scope';
-import { setContext } from '../../system/vscode/context';
 import type { LinesChangeEvent } from '../../trackers/lineTracker';
 import type { FileHistoryView } from '../fileHistoryView';
 import type { LineHistoryView } from '../lineHistoryView';
@@ -85,9 +86,9 @@ export class LineHistoryTrackerNode extends SubscribeableViewNode<
 
 			let branch;
 			if (!commitish.sha || commitish.sha === 'HEAD') {
-				branch = await this.view.container.git.getBranch(this.uri.repoPath);
+				branch = await this.view.container.git.branches(commitish.repoPath).getBranch();
 			} else if (!isSha(commitish.sha)) {
-				branch = await this.view.container.git.getBranch(this.uri.repoPath, commitish.sha);
+				branch = await this.view.container.git.branches(commitish.repoPath).getBranch(commitish.sha);
 			}
 			this.child = new LineHistoryNode(fileUri, this.view, this, branch, selection, editorContents);
 		}
@@ -130,7 +131,7 @@ export class LineHistoryTrackerNode extends SubscribeableViewNode<
 		if (pick == null) return;
 
 		if (isBranchReference(pick)) {
-			const branch = await this.view.container.git.getBranch(this.uri.repoPath);
+			const branch = await this.view.container.git.branches(this.uri.repoPath!).getBranch();
 			this._base = branch?.name === pick.name ? undefined : pick.ref;
 		} else {
 			this._base = pick.ref;

@@ -1,8 +1,7 @@
-import type { ResetGitCommandArgs } from '../../commands/git/reset';
 import { Container } from '../../container';
 import type { ViewsWithRepositoryFolders } from '../../views/viewBase';
 import { executeGitCommand } from '../actions';
-import type { GitBranchReference, GitReference, GitRevisionReference } from '../models/reference';
+import type { GitBranchReference, GitReference, GitRevisionReference, GitTagReference } from '../models/reference';
 import type { Repository } from '../models/repository';
 
 export function cherryPick(repo?: string | Repository, refs?: GitRevisionReference | GitRevisionReference[]) {
@@ -34,18 +33,25 @@ export function push(repos?: string | string[] | Repository | Repository[], forc
 export function rebase(repo?: string | Repository, ref?: GitReference, interactive: boolean = true) {
 	return executeGitCommand({
 		command: 'rebase',
-		state: { repo: repo, reference: ref, flags: interactive ? ['--interactive'] : [] },
+		state: { repo: repo, destination: ref, flags: interactive ? ['--interactive'] : [] },
 	});
 }
 
 export function reset(
 	repo?: string | Repository,
-	ref?: GitRevisionReference,
-	flags?: NonNullable<ResetGitCommandArgs['state']>['flags'],
+	ref?: GitRevisionReference | GitTagReference,
+	options?: { hard?: boolean; soft?: never } | { hard?: never; soft?: boolean },
 ) {
+	const flags: Array<'--hard' | '--soft'> = [];
+	if (options?.hard) {
+		flags.push('--hard');
+	} else if (options?.soft) {
+		flags.push('--soft');
+	}
+
 	return executeGitCommand({
 		command: 'reset',
-		confirm: flags == null || flags.includes('--hard'),
+		confirm: options == null || options.hard,
 		state: { repo: repo, reference: ref, flags: flags },
 	});
 }
@@ -65,7 +71,7 @@ export function switchTo(repos?: string | string[] | Repository | Repository[], 
 	});
 }
 
-export async function reveal(
+export function reveal(
 	repoPath: string,
 	view?: ViewsWithRepositoryFolders,
 	options?: {
@@ -74,11 +80,5 @@ export async function reveal(
 		expand?: boolean | number;
 	},
 ) {
-	const node = view?.canReveal
-		? await view.revealRepository(repoPath, options)
-		: await Container.instance.repositoriesView.revealRepository(repoPath, options);
-	if (node == null) {
-		void (view ?? Container.instance.repositoriesView).show({ preserveFocus: !options?.focus });
-	}
-	return node;
+	return Container.instance.views.revealRepository(repoPath, view, options);
 }

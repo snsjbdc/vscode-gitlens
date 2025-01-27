@@ -1,23 +1,23 @@
 import type { TextEditor, Uri } from 'vscode';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { StoredNamedRef } from '../constants.storage';
 import type { Container } from '../container';
 import { GitUri } from '../git/gitUri';
-import { getBranchNameAndRemote } from '../git/models/branch';
 import type { GitReference } from '../git/models/reference';
-import { createReference } from '../git/models/reference';
+import { getBranchNameAndRemote } from '../git/utils/branch.utils';
+import { createReference } from '../git/utils/reference.utils';
 import { showGenericErrorMessage } from '../messages';
 import { ReferencesQuickPickIncludes, showReferencePicker } from '../quickpicks/referencePicker';
 import { showRemotePicker } from '../quickpicks/remotePicker';
 import { getBestRepositoryOrShowPicker } from '../quickpicks/repositoryPicker';
+import { command } from '../system/-webview/command';
 import { Logger } from '../system/logger';
 import { normalizePath } from '../system/path';
-import { command } from '../system/vscode/command';
 import { DeepLinkType, deepLinkTypeToString, refTypeToDeepLinkType } from '../uris/deepLinks/deepLink';
-import type { CommandContext } from './base';
+import { ActiveEditorCommand } from './commandBase';
+import { getCommandUri } from './commandBase.utils';
+import type { CommandContext } from './commandContext';
 import {
-	ActiveEditorCommand,
-	getCommandUri,
 	isCommandContextEditorLine,
 	isCommandContextViewNodeHasBranch,
 	isCommandContextViewNodeHasCommit,
@@ -25,7 +25,7 @@ import {
 	isCommandContextViewNodeHasRemote,
 	isCommandContextViewNodeHasTag,
 	isCommandContextViewNodeHasWorkspace,
-} from './base';
+} from './commandContext.utils';
 
 export interface CopyDeepLinkCommandArgs {
 	refOrRepoPath?: GitReference | string;
@@ -40,12 +40,12 @@ export interface CopyDeepLinkCommandArgs {
 export class CopyDeepLinkCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
 		super([
-			Commands.CopyDeepLinkToBranch,
-			Commands.CopyDeepLinkToCommit,
-			Commands.CopyDeepLinkToRepo,
-			Commands.CopyDeepLinkToTag,
-			Commands.CopyDeepLinkToComparison,
-			Commands.CopyDeepLinkToWorkspace,
+			GlCommand.CopyDeepLinkToBranch,
+			GlCommand.CopyDeepLinkToCommit,
+			GlCommand.CopyDeepLinkToRepo,
+			GlCommand.CopyDeepLinkToTag,
+			GlCommand.CopyDeepLinkToComparison,
+			GlCommand.CopyDeepLinkToWorkspace,
 		]);
 	}
 
@@ -53,8 +53,14 @@ export class CopyDeepLinkCommand extends ActiveEditorCommand {
 		if (args == null) {
 			if (isCommandContextViewNodeHasCommit(context)) {
 				args = { refOrRepoPath: context.node.commit };
+			} else if (isCommandContextViewNodeHasComparison(context)) {
+				args = {
+					refOrRepoPath: context.node.uri.fsPath,
+					compareRef: context.node.compareRef,
+					compareWithRef: context.node.compareWithRef,
+				};
 			} else if (isCommandContextViewNodeHasBranch(context)) {
-				if (context.command === Commands.CopyDeepLinkToRepo) {
+				if (context.command === GlCommand.CopyDeepLinkToRepo) {
 					args = {
 						refOrRepoPath: context.node.branch.repoPath,
 						remote: context.node.branch.getRemoteName(),
@@ -66,12 +72,6 @@ export class CopyDeepLinkCommand extends ActiveEditorCommand {
 				args = { refOrRepoPath: context.node.tag };
 			} else if (isCommandContextViewNodeHasRemote(context)) {
 				args = { refOrRepoPath: context.node.remote.repoPath, remote: context.node.remote.name };
-			} else if (isCommandContextViewNodeHasComparison(context)) {
-				args = {
-					refOrRepoPath: context.node.uri.fsPath,
-					compareRef: context.node.compareRef,
-					compareWithRef: context.node.compareWithRef,
-				};
 			} else if (isCommandContextViewNodeHasWorkspace(context)) {
 				args = { workspaceId: context.node.workspace.id };
 			}
@@ -128,7 +128,7 @@ export class CopyDeepLinkCommand extends ActiveEditorCommand {
 
 		try {
 			let chosenRemote;
-			const remotes = await this.container.git.getRemotes(repoPath, { sort: true });
+			const remotes = await this.container.git.remotes(repoPath).getRemotes({ sort: true });
 			const defaultRemote = remotes.find(r => r.default);
 			if (args.remote && !args.prePickRemote) {
 				chosenRemote = remotes.find(r => r.name === args?.remote);
@@ -182,7 +182,7 @@ export interface CopyFileDeepLinkCommandArgs {
 @command()
 export class CopyFileDeepLinkCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super([Commands.CopyDeepLinkToFile, Commands.CopyDeepLinkToFileAtRevision, Commands.CopyDeepLinkToLines]);
+		super([GlCommand.CopyDeepLinkToFile, GlCommand.CopyDeepLinkToFileAtRevision, GlCommand.CopyDeepLinkToLines]);
 	}
 
 	protected override preExecute(context: CommandContext, args?: CopyFileDeepLinkCommandArgs) {
@@ -190,11 +190,11 @@ export class CopyFileDeepLinkCommand extends ActiveEditorCommand {
 			args = {};
 		}
 
-		if (args.ref == null && context.command === Commands.CopyDeepLinkToFileAtRevision) {
+		if (args.ref == null && context.command === GlCommand.CopyDeepLinkToFileAtRevision) {
 			args.chooseRef = true;
 		}
 
-		if (args.lines == null && context.command === Commands.CopyDeepLinkToLines) {
+		if (args.lines == null && context.command === GlCommand.CopyDeepLinkToLines) {
 			let lines: number[] | undefined;
 			if (isCommandContextEditorLine(context) && context.line != null) {
 				lines = [context.line + 1];
@@ -291,7 +291,7 @@ export class CopyFileDeepLinkCommand extends ActiveEditorCommand {
 
 		try {
 			let chosenRemote;
-			const remotes = await this.container.git.getRemotes(repoPath, { sort: true });
+			const remotes = await this.container.git.remotes(repoPath).getRemotes({ sort: true });
 			const defaultRemote = remotes.find(r => r.default);
 			if (args.remote && !args.prePickRemote) {
 				chosenRemote = remotes.find(r => r.name === args?.remote);

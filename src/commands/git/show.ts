@@ -105,7 +105,7 @@ export class ShowGitCommand extends QuickCommand<State> {
 	protected async *steps(state: PartialStepState<State>): StepGenerator {
 		const context: Context = {
 			repos: this.container.git.openRepositories,
-			associatedView: this.container.commitsView,
+			associatedView: this.container.views.commits,
 			title: this.title,
 		};
 
@@ -141,7 +141,9 @@ export class ShowGitCommand extends QuickCommand<State> {
 				state.reference.file != null
 			) {
 				if (state.reference != null && !isCommit(state.reference)) {
-					state.reference = await this.container.git.getCommit(state.reference.repoPath, state.reference.ref);
+					state.reference = await this.container.git
+						.commits(state.reference.repoPath)
+						.getCommit(state.reference.ref);
 				}
 
 				if (state.counter < 2 || state.reference == null) {

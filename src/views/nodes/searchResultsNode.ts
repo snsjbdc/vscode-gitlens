@@ -1,13 +1,13 @@
-import { md5 } from '@env/crypto';
 import type { TreeItem } from 'vscode';
 import { ThemeIcon } from 'vscode';
+import { md5 } from '@env/crypto';
 import type { SearchQuery } from '../../constants.search';
 import { executeGitCommand } from '../../git/actions';
 import { GitUri } from '../../git/gitUri';
 import type { GitLog } from '../../git/models/log';
 import type { CommitsQueryResults } from '../../git/queryResults';
 import { getSearchQueryComparisonKey, getStoredSearchQuery } from '../../git/search';
-import { gate } from '../../system/decorators/gate';
+import { gate } from '../../system/decorators/-webview/gate';
 import { debug } from '../../system/decorators/log';
 import { pluralize } from '../../system/string';
 import type { SearchAndCompareView } from '../searchAndCompareView';
@@ -58,7 +58,7 @@ export class SearchResultsNode extends ViewNode<'search-results', SearchAndCompa
 		// If this is a new search, save it
 		if (this._storedAt === 0) {
 			this._storedAt = Date.now();
-			void this.store(true);
+			void this.store(true).catch();
 		}
 	}
 
@@ -232,7 +232,7 @@ export class SearchResultsNode extends ViewNode<'search-results', SearchAndCompa
 		let useCacheOnce = true;
 
 		return async (limit: number | undefined) => {
-			log = await (log ?? this.view.container.git.richSearchCommits(this.repoPath, this.search));
+			log = await (log ?? this.view.container.git.commits(this.repoPath).searchCommits(this.search));
 
 			if (!useCacheOnce && log?.query != null) {
 				log = await log.query(limit);

@@ -3,23 +3,21 @@ import { Disposable, MarkdownString, StatusBarAlignment, ThemeColor, window } fr
 import type { OpenWalkthroughCommandArgs } from '../../commands/walkthroughs';
 import { proBadge } from '../../constants';
 import type { Colors } from '../../constants.colors';
-import { Commands } from '../../constants.commands';
+import { GlCommand } from '../../constants.commands';
 import type { HostingIntegrationId } from '../../constants.integrations';
 import type { Container } from '../../container';
+import { executeCommand, registerCommand } from '../../system/-webview/command';
+import { configuration } from '../../system/-webview/configuration';
+import { once } from '../../system/event';
 import { groupByMap } from '../../system/iterable';
 import { wait } from '../../system/promise';
 import { pluralize } from '../../system/string';
-import { executeCommand, registerCommand } from '../../system/vscode/command';
-import { configuration } from '../../system/vscode/configuration';
 import type { ConnectionStateChangeEvent } from '../integrations/integrationService';
 import type { LaunchpadCommandArgs } from './launchpad';
-import type { LaunchpadGroup, LaunchpadItem, LaunchpadProvider, LaunchpadRefreshEvent } from './launchpadProvider';
-import {
-	groupAndSortLaunchpadItems,
-	launchpadGroupIconMap,
-	launchpadPriorityGroups,
-	supportedLaunchpadIntegrations,
-} from './launchpadProvider';
+import type { LaunchpadItem, LaunchpadProvider, LaunchpadRefreshEvent } from './launchpadProvider';
+import { groupAndSortLaunchpadItems, supportedLaunchpadIntegrations } from './launchpadProvider';
+import type { LaunchpadGroup } from './models/launchpad';
+import { launchpadGroupIconMap, launchpadPriorityGroups } from './models/launchpad';
 
 type LaunchpadIndicatorState = 'idle' | 'disconnected' | 'loading' | 'load' | 'failed';
 
@@ -44,10 +42,9 @@ export class LaunchpadIndicator implements Disposable {
 			provider.onDidRefresh(this.onLaunchpadRefreshed, this),
 			configuration.onDidChange(this.onConfigurationChanged, this),
 			container.integrations.onDidChangeConnectionState(this.onConnectedIntegrationsChanged, this),
+			once(container.onReady)(this.onReady, this),
 			...this.registerCommands(),
 		);
-
-		void this.onReady();
 	}
 
 	dispose() {
@@ -308,7 +305,7 @@ export class LaunchpadIndicator implements Disposable {
 		const labelType = configuration.get('launchpad.indicator.label') ?? 'item';
 		this._statusBarLaunchpad.command = {
 			title: 'Open Launchpad',
-			command: Commands.ShowLaunchpad,
+			command: GlCommand.ShowLaunchpad,
 			arguments: [
 				{
 					source: 'launchpad-indicator',
@@ -368,7 +365,7 @@ export class LaunchpadIndicator implements Disposable {
 									source: 'launchpad-indicator',
 									state: {
 										initialGroup: 'mergeable',
-										selectTopItem: labelType === 'item',
+										selectTopItem: true,
 									},
 								} satisfies Omit<LaunchpadCommandArgs, 'command'>),
 							)} "Open Ready to Merge in Launchpad")`,
@@ -429,7 +426,10 @@ export class LaunchpadIndicator implements Disposable {
 							}](command:gitlens.showLaunchpad?${encodeURIComponent(
 								JSON.stringify({
 									source: 'launchpad-indicator',
-									state: { initialGroup: 'blocked', selectTopItem: labelType === 'item' },
+									state: {
+										initialGroup: 'blocked',
+										selectTopItem: true,
+									},
 								} satisfies Omit<LaunchpadCommandArgs, 'command'>),
 							)} "Open Blocked in Launchpad")`,
 						);
@@ -465,7 +465,7 @@ export class LaunchpadIndicator implements Disposable {
 									source: 'launchpad-indicator',
 									state: {
 										initialGroup: 'follow-up',
-										selectTopItem: labelType === 'item',
+										selectTopItem: true,
 									},
 								} satisfies Omit<LaunchpadCommandArgs, 'command'>),
 							)} "Open Follow-Up in Launchpad")`,
@@ -488,7 +488,7 @@ export class LaunchpadIndicator implements Disposable {
 									source: 'launchpad-indicator',
 									state: {
 										initialGroup: 'needs-review',
-										selectTopItem: labelType === 'item',
+										selectTopItem: true,
 									},
 								} satisfies Omit<LaunchpadCommandArgs, 'command'>),
 							)} "Open Needs Your Review in Launchpad")`,
@@ -540,8 +540,8 @@ export class LaunchpadIndicator implements Disposable {
 				this.storeFirstInteractionIfNeeded();
 				switch (action) {
 					case 'info': {
-						void executeCommand<OpenWalkthroughCommandArgs>(Commands.OpenWalkthrough, {
-							step: 'launchpad',
+						void executeCommand<OpenWalkthroughCommandArgs>(GlCommand.OpenWalkthrough, {
+							step: 'accelerate-pr-reviews',
 							source: 'launchpad-indicator',
 							detail: 'info',
 						});
@@ -584,7 +584,7 @@ export class LaunchpadIndicator implements Disposable {
 
 		const hasLoaded = this.container.storage.get('launchpad:indicator:hasLoaded') ?? false;
 		if (!hasLoaded) {
-			void this.container.storage.store('launchpad:indicator:hasLoaded', true);
+			void this.container.storage.store('launchpad:indicator:hasLoaded', true).catch();
 			this.container.telemetry.sendEvent('launchpad/indicator/firstLoad');
 		}
 	}
@@ -597,4 +597,99 @@ export class LaunchpadIndicator implements Disposable {
 	private hasInteracted() {
 		return this.container.storage.get('launchpad:indicator:hasInteracted') != null;
 	}
+}
+
+export interface LaunchpadSummaryResult {
+	total: number;
+	groups: LaunchpadGroup[];
+	hasGroupedItems: boolean;
+
+	mergeable?: {
+		total: number;
+	};
+
+	blocked?: {
+		total: number;
+
+		blocked: number;
+		conflicts: number;
+		failedChecks: number;
+		unassignedReviewers: number;
+	};
+
+	followUp?: {
+		total: number;
+	};
+	needsReview?: {
+		total: number;
+	};
+
+	snoozed?: {
+		total: number;
+		items: LaunchpadItem[];
+	};
+	pinned?: {
+		total: number;
+		items: LaunchpadItem[];
+	};
+}
+
+export function generateLaunchpadSummary(
+	items: LaunchpadItem[] | undefined,
+	groups: LaunchpadGroup[],
+): LaunchpadSummaryResult {
+	const groupedItems = groupAndSortLaunchpadItems(items);
+	const total = Array.from(groupedItems.values()).reduce((total, group) => total + group.length, 0);
+	const hasGroupedItems = groups.some(group => groupedItems.get(group)?.length);
+
+	if (total === 0 || !hasGroupedItems) {
+		return { total: total, groups: groups, hasGroupedItems: false };
+	}
+
+	const result: LaunchpadSummaryResult = { total: total, groups: groups, hasGroupedItems: hasGroupedItems };
+
+	for (const group of groups) {
+		const itemsInGroup = groupedItems.get(group);
+		if (!itemsInGroup?.length) continue;
+
+		switch (group) {
+			case 'mergeable':
+				result.mergeable = { total: itemsInGroup.length };
+				break;
+			case 'blocked': {
+				const grouped = groupByMap(itemsInGroup, i =>
+					i.actionableCategory === 'failed-checks' ||
+					i.actionableCategory === 'conflicts' ||
+					i.actionableCategory === 'unassigned-reviewers'
+						? i.actionableCategory
+						: 'blocked',
+				);
+
+				result.blocked = {
+					total: itemsInGroup.length,
+
+					blocked: grouped.get('blocked')?.length ?? 0,
+					conflicts: grouped.get('conflicts')?.length ?? 0,
+					failedChecks: grouped.get('failed-checks')?.length ?? 0,
+					unassignedReviewers: grouped.get('unassigned-reviewers')?.length ?? 0,
+				};
+
+				break;
+			}
+			case 'follow-up':
+				result.followUp = { total: itemsInGroup.length };
+				break;
+			case 'needs-review':
+				result.needsReview = { total: itemsInGroup.length };
+				break;
+			case 'snoozed':
+				result.snoozed = { items: itemsInGroup, total: itemsInGroup.length };
+				break;
+			case 'pinned':
+				result.pinned = { items: itemsInGroup, total: itemsInGroup.length };
+				break;
+		}
+	}
+
+	return result;
 }

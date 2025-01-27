@@ -1,7 +1,12 @@
 import type { CancellationToken, Event, MessageItem } from 'vscode';
 import { EventEmitter, window } from 'vscode';
 import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks';
-import type { IntegrationId, IssueIntegrationId, SelfHostedIntegrationId } from '../../constants.integrations';
+import type {
+	CloudSelfHostedIntegrationId,
+	IntegrationId,
+	IssueIntegrationId,
+	SelfHostedIntegrationId,
+} from '../../constants.integrations';
 import { HostingIntegrationId } from '../../constants.integrations';
 import type { Sources } from '../../constants.telemetry';
 import type { Container } from '../../container';
@@ -9,7 +14,8 @@ import { AuthenticationError, CancellationError, RequestClientError } from '../.
 import type { PagedResult } from '../../git/gitProvider';
 import type { Account, UnidentifiedAuthor } from '../../git/models/author';
 import type { DefaultBranch } from '../../git/models/defaultBranch';
-import type { IssueOrPullRequest, SearchedIssue } from '../../git/models/issue';
+import type { Issue, SearchedIssue } from '../../git/models/issue';
+import type { IssueOrPullRequest } from '../../git/models/issueOrPullRequest';
 import type {
 	PullRequest,
 	PullRequestMergeMethod,
@@ -17,19 +23,21 @@ import type {
 	SearchedPullRequest,
 } from '../../git/models/pullRequest';
 import type { RepositoryMetadata } from '../../git/models/repositoryMetadata';
+import type { PullRequestUrlIdentity } from '../../git/utils/pullRequest.utils';
 import { showIntegrationDisconnectedTooManyFailedRequestsWarningMessage } from '../../messages';
-import { gate } from '../../system/decorators/gate';
+import { configuration } from '../../system/-webview/configuration';
+import { gate } from '../../system/decorators/-webview/gate';
 import { debug, log } from '../../system/decorators/log';
 import { first } from '../../system/iterable';
 import { Logger } from '../../system/logger';
 import type { LogScope } from '../../system/logger.scope';
 import { getLogScope } from '../../system/logger.scope';
-import { configuration } from '../../system/vscode/configuration';
+import { isSubscriptionStatePaidOrTrial } from '../gk/utils/subscription.utils';
 import type {
 	IntegrationAuthenticationProviderDescriptor,
-	IntegrationAuthenticationService,
 	IntegrationAuthenticationSessionDescriptor,
-} from './authentication/integrationAuthentication';
+} from './authentication/integrationAuthenticationProvider';
+import type { IntegrationAuthenticationService } from './authentication/integrationAuthenticationService';
 import type { ProviderAuthenticationSession } from './authentication/models';
 import type {
 	GetIssuesOptions,
@@ -52,6 +60,7 @@ export type IntegrationResult<T> =
 
 export type SupportedIntegrationIds = IntegrationId;
 export type SupportedHostingIntegrationIds = HostingIntegrationId;
+export type SupportedCloudSelfHostedIntegrationIds = CloudSelfHostedIntegrationId;
 export type SupportedIssueIntegrationIds = IssueIntegrationId;
 export type SupportedSelfHostedIntegrationIds = SelfHostedIntegrationId;
 
@@ -68,6 +77,38 @@ export type IntegrationKeyById<T extends SupportedIntegrationIds> = T extends Su
 export type IntegrationType = 'issues' | 'hosting';
 
 export type ResourceDescriptor = { key: string } & Record<string, unknown>;
+
+export type IssueResourceDescriptor = ResourceDescriptor & {
+	id: string;
+	name: string;
+};
+
+export type RepositoryDescriptor = ResourceDescriptor & {
+	owner: string;
+	name: string;
+};
+
+export function isIssueResourceDescriptor(resource: ResourceDescriptor): resource is IssueResourceDescriptor {
+	return (
+		'key' in resource &&
+		resource.key != null &&
+		'id' in resource &&
+		resource.id != null &&
+		'name' in resource &&
+		resource.name != null
+	);
+}
+
+export function isRepositoryDescriptor(resource: ResourceDescriptor): resource is RepositoryDescriptor {
+	return (
+		'key' in resource &&
+		resource.key != null &&
+		'owner' in resource &&
+		resource.owner != null &&
+		'name' in resource &&
+		resource.name != null
+	);
+}
 
 export function isHostingIntegration(integration: Integration): integration is HostingIntegration {
 	return integration.type === 'hosting';
@@ -105,6 +146,11 @@ export abstract class IntegrationBase<
 
 	get icon(): string {
 		return this.id;
+	}
+
+	async access(): Promise<boolean> {
+		const subscription = await this.container.subscription.getSubscription();
+		return isSubscriptionStatePaidOrTrial(subscription.state);
 	}
 
 	autolinks():
@@ -194,7 +240,7 @@ export abstract class IntegrationBase<
 			// Don't store the disconnected flag if silently disconnecting or disconnecting this only for
 			// this current VS Code session (will be re-connected on next restart)
 			if (!options?.currentSessionOnly && !options?.silent) {
-				void this.container.storage.storeWorkspace(this.connectedKey, false);
+				void this.container.storage.storeWorkspace(this.connectedKey, false).catch();
 			}
 
 			this._onDidChange.fire();
@@ -440,6 +486,43 @@ export abstract class IntegrationBase<
 		id: string,
 	): Promise<IssueOrPullRequest | undefined>;
 
+	@debug()
+	async getIssue(
+		resource: T,
+		id: string,
+		options?: { expiryOverride?: boolean | number },
+	): Promise<Issue | undefined> {
+		const scope = getLogScope();
+
+		const connected = this.maybeConnected ?? (await this.isConnected());
+		if (!connected) return undefined;
+
+		const issue = this.container.cache.getIssue(
+			id,
+			resource,
+			this,
+			() => ({
+				value: (async () => {
+					try {
+						const result = await this.getProviderIssue(this._session!, resource, id);
+						this.resetRequestExceptionCount();
+						return result;
+					} catch (ex) {
+						return this.handleProviderException<Issue | undefined>(ex, scope, undefined);
+					}
+				})(),
+			}),
+			options,
+		);
+		return issue;
+	}
+
+	protected abstract getProviderIssue(
+		session: ProviderAuthenticationSession,
+		resource: T,
+		id: string,
+	): Promise<Issue | undefined>;
+
 	async getCurrentAccount(options?: {
 		avatarSize?: number;
 		expiryOverride?: boolean | number;
@@ -481,7 +564,7 @@ export abstract class IntegrationBase<
 		const connected = this.maybeConnected ?? (await this.isConnected());
 		if (!connected) return undefined;
 
-		const pr = this.container.cache.getPullRequest(id, resource, this, () => ({
+		const pr = await this.container.cache.getPullRequest(id, resource, this, () => ({
 			value: (async () => {
 				try {
 					const result = await this.getProviderPullRequest?.(this._session!, resource, id);
@@ -1286,4 +1369,10 @@ export abstract class HostingIntegration<
 		repos?: T[],
 		cancellation?: CancellationToken,
 	): Promise<PullRequest[] | undefined>;
+
+	getPullRequestIdentityFromMaybeUrl(search: string): PullRequestUrlIdentity | undefined {
+		return this.getProviderPullRequestIdentityFromMaybeUrl?.(search);
+	}
+
+	protected getProviderPullRequestIdentityFromMaybeUrl?(search: string): PullRequestUrlIdentity | undefined;
 }

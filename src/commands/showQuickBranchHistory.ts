@@ -1,13 +1,14 @@
 import type { TextEditor, Uri } from 'vscode';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { executeGitCommand } from '../git/actions';
 import { GitUri } from '../git/gitUri';
 import type { GitReference } from '../git/models/reference';
-import { createReference } from '../git/models/reference';
-import { command } from '../system/vscode/command';
-import type { CommandContext } from './base';
-import { ActiveEditorCachedCommand, getCommandUri } from './base';
+import { createReference } from '../git/utils/reference.utils';
+import { command } from '../system/-webview/command';
+import { ActiveEditorCachedCommand } from './commandBase';
+import { getCommandUri } from './commandBase.utils';
+import type { CommandContext } from './commandContext';
 
 export interface ShowQuickBranchHistoryCommandArgs {
 	repoPath?: string;
@@ -18,11 +19,11 @@ export interface ShowQuickBranchHistoryCommandArgs {
 @command()
 export class ShowQuickBranchHistoryCommand extends ActiveEditorCachedCommand {
 	constructor(private readonly container: Container) {
-		super([Commands.ShowQuickBranchHistory, Commands.ShowQuickCurrentBranchHistory]);
+		super([GlCommand.ShowQuickBranchHistory, GlCommand.ShowQuickCurrentBranchHistory]);
 	}
 
 	protected override preExecute(context: CommandContext, args?: ShowQuickBranchHistoryCommandArgs) {
-		if (context.command === Commands.ShowQuickCurrentBranchHistory) {
+		if (context.command === GlCommand.ShowQuickCurrentBranchHistory) {
 			args = { ...args };
 			args.branch = 'HEAD';
 		}

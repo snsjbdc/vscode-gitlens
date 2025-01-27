@@ -3,14 +3,14 @@ import type { Colors } from '../../constants.colors';
 import type { FilesComparison } from '../../git/actions/commit';
 import { GitUri } from '../../git/gitUri';
 import type { GitBranch, GitTrackingState } from '../../git/models/branch';
-import { getRemoteNameFromBranchName } from '../../git/models/branch';
 import type { GitLog } from '../../git/models/log';
-import { createRevisionRange } from '../../git/models/reference';
 import type { GitRemote } from '../../git/models/remote';
-import { getHighlanderProviders } from '../../git/models/remote';
-import { getUpstreamStatus } from '../../git/models/status';
+import { getRemoteNameFromBranchName } from '../../git/utils/branch.utils';
+import { getHighlanderProviders } from '../../git/utils/remote.utils';
+import { createRevisionRange } from '../../git/utils/revision.utils';
+import { getUpstreamStatus } from '../../git/utils/status.utils';
 import { fromNow } from '../../system/date';
-import { gate } from '../../system/decorators/gate';
+import { gate } from '../../system/decorators/-webview/gate';
 import { debug } from '../../system/decorators/log';
 import { first, last, map } from '../../system/iterable';
 import { pluralize } from '../../system/string';
@@ -113,10 +113,9 @@ export class BranchTrackingStatusNode
 			const commit = commits[commits.length - 1];
 			const previousSha = await commit.getPreviousSha();
 			if (previousSha == null) {
-				const previousLog = await this.view.container.git.getLog(this.uri.repoPath!, {
-					limit: 2,
-					ref: commit.sha,
-				});
+				const previousLog = await this.view.container.git
+					.commits(this.uri.repoPath!)
+					.getLog(commit.sha, { limit: 2 });
 				if (previousLog != null) {
 					commits[commits.length - 1] = first(previousLog.commits.values())!;
 				}
@@ -212,10 +211,10 @@ export class BranchTrackingStatusNode
 			case 'ahead': {
 				const remote = await this.branch.getRemote();
 
-				label = `Outgoing changes to ${
+				label = 'Outgoing';
+				description = `${pluralize('commit', this.status.state.ahead)} to push to ${
 					remote?.name ?? getRemoteNameFromBranchName(this.status.upstream!.name)
 				}`;
-				description = pluralize('commit', this.status.state.ahead);
 				tooltip = `${pluralize('commit', this.status.state.ahead)} to push to \`${
 					this.status.upstream!.name
 				}\`${remote?.provider?.name ? ` on ${remote?.provider.name}` : ''}\\\n${getBranchStatus.call(
@@ -237,10 +236,10 @@ export class BranchTrackingStatusNode
 			case 'behind': {
 				const remote = await this.branch.getRemote();
 
-				label = `Incoming changes from ${
+				label = 'Incoming';
+				description = `${pluralize('commit', this.status.state.behind)} to pull from ${
 					remote?.name ?? getRemoteNameFromBranchName(this.status.upstream!.name)
 				}`;
-				description = pluralize('commit', this.status.state.behind);
 				tooltip = `${pluralize('commit', this.status.state.behind)} to pull from \`${
 					this.status.upstream!.name
 				}\`${remote?.provider?.name ? ` on ${remote.provider.name}` : ''}\\\n${getBranchStatus.call(
@@ -265,7 +264,7 @@ export class BranchTrackingStatusNode
 				label = `Up to date with ${remote?.name ?? getRemoteNameFromBranchName(this.status.upstream!.name)}${
 					remote?.provider?.name ? ` on ${remote.provider.name}` : ''
 				}`;
-				description = lastFetched ? `Last fetched ${fromNow(new Date(lastFetched))}` : '';
+				description = lastFetched ? fromNow(lastFetched) : '';
 				tooltip = getBranchStatus.call(this, remote);
 
 				collapsibleState = TreeItemCollapsibleState.None;
@@ -295,7 +294,7 @@ export class BranchTrackingStatusNode
 				break;
 			}
 			case 'none': {
-				const remotes = await this.view.container.git.getRemotesWithProviders(this.branch.repoPath);
+				const remotes = await this.view.container.git.remotes(this.branch.repoPath).getRemotesWithProviders();
 				const providers = getHighlanderProviders(remotes);
 				const providerName = providers?.length ? providers[0].name : undefined;
 
@@ -318,7 +317,7 @@ export class BranchTrackingStatusNode
 		item.contextValue = contextValue;
 		item.description = description;
 		if (lastFetched) {
-			tooltip += `\n\nLast fetched ${fromNow(new Date(lastFetched))}`;
+			tooltip += `\n\nLast fetched ${fromNow(lastFetched)}`;
 		}
 		item.iconPath = icon;
 
@@ -349,10 +348,9 @@ export class BranchTrackingStatusNode
 					? createRevisionRange(this.status.upstream?.name, this.status.ref, '..')
 					: createRevisionRange(this.status.ref, this.status.upstream?.name, '..');
 
-			this._log = await this.view.container.git.getLog(this.uri.repoPath!, {
-				limit: this.limit ?? this.view.config.defaultItemLimit,
-				ref: range,
-			});
+			this._log = await this.view.container.git
+				.commits(this.uri.repoPath!)
+				.getLog(range, { limit: this.limit ?? this.view.config.defaultItemLimit });
 		}
 
 		return this._log;

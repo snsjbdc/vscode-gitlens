@@ -3,14 +3,14 @@ import type { Autolink } from '../../autolinks';
 import type { Config, DateStyle } from '../../config';
 import type { Sources } from '../../constants.telemetry';
 import type { GitCommitIdentityShape, GitCommitStats } from '../../git/models/commit';
-import type { GitFileChangeShape } from '../../git/models/file';
-import type { IssueOrPullRequest } from '../../git/models/issue';
+import type { GitFileChangeShape } from '../../git/models/fileChange';
+import type { IssueOrPullRequest } from '../../git/models/issueOrPullRequest';
 import type { PullRequestShape } from '../../git/models/pullRequest';
 import type { Repository } from '../../git/models/repository';
-import type { Draft, DraftVisibility } from '../../gk/models/drafts';
-import type { Change, DraftUserSelection } from '../../plus/webviews/patchDetails/protocol';
+import type { Draft, DraftVisibility } from '../../plus/drafts/models/drafts';
+import type { Serialized } from '../../system/-webview/serialize';
 import type { DateTimeFormat } from '../../system/date';
-import type { Serialized } from '../../system/vscode/serialize';
+import type { Change, DraftUserSelection } from '../plus/patchDetails/protocol';
 import type { IpcScope, WebviewState } from '../protocol';
 import { IpcCommand, IpcNotification, IpcRequest } from '../protocol';
 
@@ -203,8 +203,8 @@ export const OpenPullRequestDetailsCommand = new IpcCommand(scope, 'openPullRequ
 
 export type DidExplainParams =
 	| {
-			summary: string | undefined;
-			error?: undefined;
+			result: { summary: string; body: string };
+			error?: never;
 	  }
 	| { error: { message: string } };
 export const ExplainRequest = new IpcRequest<void, DidExplainParams>(scope, 'explain');

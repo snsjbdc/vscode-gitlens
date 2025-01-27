@@ -3,9 +3,11 @@ import globals from 'globals';
 import js from '@eslint/js';
 import ts from 'typescript-eslint';
 import antiTrojanSource from 'eslint-plugin-anti-trojan-source';
+import { createOxcImportResolver } from 'eslint-import-resolver-oxc';
 import importX from 'eslint-plugin-import-x';
 import { configs as litConfigs } from 'eslint-plugin-lit';
 import { configs as wcConfigs } from 'eslint-plugin-wc';
+import noSrcImports from './scripts/eslint-rules/no-src-imports.js';
 
 export default ts.config(
 	js.configs.recommended,
@@ -20,8 +22,14 @@ export default ts.config(
 		plugins: {
 			'import-x': importX,
 			'anti-trojan-source': antiTrojanSource,
+			'@gitlens': {
+				rules: {
+					'no-src-imports': noSrcImports,
+				},
+			},
 		},
 		rules: {
+			'@gitlens/no-src-imports': 'error',
 			'anti-trojan-source/no-bidi': 'error',
 			curly: ['error', 'multi-line', 'consistent'],
 			eqeqeq: ['error', 'always', { null: 'ignore' }],
@@ -244,6 +252,16 @@ export default ts.config(
 						'util',
 						'vm',
 						'zlib',
+						{
+							name: 'react-dom',
+							importNames: ['Container'],
+							message: 'Use our Container instead',
+						},
+						{
+							name: 'vscode',
+							importNames: ['CancellationError'],
+							message: 'Use our CancellationError instead',
+						},
 					],
 					patterns: [
 						{
@@ -251,18 +269,8 @@ export default ts.config(
 							message: 'Use @env/ instead',
 						},
 						{
-							group: ['src/*'],
-							message: 'Use relative paths instead',
-						},
-						{
-							group: ['react-dom'],
-							importNames: ['Container'],
-							message: 'Use our Container instead',
-						},
-						{
-							group: ['vscode'],
-							importNames: ['CancellationError'],
-							message: 'Use our CancellationError instead',
+							group: ['**/webview/**/*'],
+							message: "Can't use any `webview`-only modules in extension",
 						},
 					],
 				},
@@ -307,17 +315,13 @@ export default ts.config(
 			'import-x/parsers': {
 				'@typescript-eslint/parser': ['.ts', '.tsx'],
 			},
-			'import-x/resolver': {
-				typescript: {
-					alwaysTryTypes: true,
-				},
-			},
+			'import-x/resolver-next': [createOxcImportResolver()],
 		},
 	},
 	{
 		name: 'extension:node',
 		files: ['src/**/*'],
-		ignores: ['src/webviews/apps/**/*', 'src/env/browser/**/*'],
+		ignores: ['**/webview/**/*', 'src/test/**/*', 'src/webviews/apps/**/*', 'src/env/browser/**/*'],
 		languageOptions: {
 			globals: {
 				...globals.node,
@@ -339,18 +343,14 @@ export default ts.config(
 			'@typescript-eslint/no-restricted-imports': [
 				'error',
 				{
-					patterns: [
+					paths: [
 						{
-							group: ['src/*'],
-							message: 'Use relative paths instead',
-						},
-						{
-							group: ['react-dom'],
+							name: 'react-dom',
 							importNames: ['Container'],
 							message: 'Use our Container instead',
 						},
 						{
-							group: ['vscode'],
+							name: 'vscode',
 							importNames: ['CancellationError'],
 							message: 'Use our CancellationError instead',
 						},
@@ -362,7 +362,7 @@ export default ts.config(
 	{
 		name: 'extension:browser',
 		files: ['src/**/*'],
-		ignores: ['src/webviews/apps/**/*', 'src/env/node/**/*'],
+		ignores: ['**/webview/**/*', 'src/test/**/*', 'src/webviews/apps/**/*', 'src/env/node/**/*'],
 		languageOptions: {
 			globals: {
 				...globals.worker,
@@ -385,21 +385,19 @@ export default ts.config(
 		// Keep in sync with `src/webviews/apps/tsconfig.json`
 		files: [
 			'src/webviews/apps/**/*',
-			'src/@types/**/*',
-			'src/env/browser/**/*',
-			'src/plus/gk/account/promos.ts',
-			'src/plus/gk/account/subscription.ts',
-			'src/plus/webviews/**/protocol.ts',
-			'src/webviews/protocol.ts',
 			'src/webviews/**/protocol.ts',
+			'src/**/models/**/*.ts',
+			'src/**/utils/**/*.ts',
+			'src/@types/**/*',
 			'src/config.ts',
 			'src/constants.ts',
 			'src/constants.*.ts',
+			'src/env/browser/**/*',
 			'src/features.ts',
-			'src/subscription.ts',
-			'src/system/*.ts',
-			'src/system/decorators/log.ts',
+			'src/system/**/*.ts',
+			'**/webview/**/*',
 		],
+		ignores: ['**/-webview/**/*'],
 		languageOptions: {
 			globals: {
 				...globals.browser,
@@ -418,19 +416,23 @@ export default ts.config(
 			'@typescript-eslint/no-restricted-imports': [
 				'error',
 				{
+					paths: [
+						{
+							name: 'vscode',
+							message: "Can't use `vscode` in webviews",
+							allowTypeImports: true,
+						},
+					],
 					patterns: [
 						{
-							group: ['src/*'],
-							message: 'Use relative paths instead',
-						},
-						{
-							group: ['react-dom'],
+							group: ['container'],
 							importNames: ['Container'],
-							message: 'Use our Container instead',
+							message: "Can't use `Container` in webviews",
+							allowTypeImports: true,
 						},
 						{
-							group: ['vscode'],
-							message: "Can't use vscode in webviews",
+							group: ['**/-webview/**/*'],
+							message: "Can't use any `-webview` modules in webviews",
 							allowTypeImports: true,
 						},
 					],

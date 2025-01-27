@@ -1,16 +1,16 @@
 import type { Range, Uri } from 'vscode';
 import { env } from 'vscode';
 import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks';
-import type { GkProviderId } from '../../gk/models/repositoryIdentities';
 import type { ResourceDescriptor } from '../../plus/integrations/integration';
-import { memoize } from '../../system/decorators/memoize';
+import { openUrl } from '../../system/-webview/vscode';
+import { memoize } from '../../system/decorators/-webview/memoize';
 import { encodeUrl } from '../../system/encoding';
 import { getSettledValue } from '../../system/promise';
-import { openUrl } from '../../system/vscode/utils';
 import type { ProviderReference } from '../models/remoteProvider';
 import type { RemoteResource } from '../models/remoteResource';
 import { RemoteResourceType } from '../models/remoteResource';
 import type { Repository } from '../models/repository';
+import type { GkProviderId } from '../models/repositoryIdentities';
 
 export type RemoteProviderId =
 	| 'azure-devops'
@@ -20,6 +20,8 @@ export type RemoteProviderId =
 	| 'gerrit'
 	| 'gitea'
 	| 'github'
+	| 'cloud-github-enterprise'
+	| 'cloud-gitlab-self-hosted'
 	| 'gitlab'
 	| 'google-source';
 
@@ -36,8 +38,19 @@ export abstract class RemoteProvider<T extends ResourceDescriptor = ResourceDesc
 		this._name = name;
 	}
 
+	protected abstract get issueLinkPattern(): string;
+
 	get autolinks(): (AutolinkReference | DynamicAutolinkReference)[] {
-		return [];
+		return [
+			{
+				url: this.issueLinkPattern,
+				prefix: '',
+				title: `Open Issue #<num> on ${this.name}`,
+				referenceType: 'branch',
+				alphanumeric: false,
+				ignoreCase: true,
+			},
+		];
 	}
 
 	get avatarUri(): Uri | undefined {
@@ -204,8 +217,4 @@ export abstract class RemoteProvider<T extends ResourceDescriptor = ResourceDesc
 		}
 		return urls;
 	}
-}
-
-export function getRemoteProviderThemeIconString(provider: RemoteProvider | undefined): string {
-	return provider != null ? `gitlens-provider-${provider.icon}` : 'cloud';
 }

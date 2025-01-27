@@ -1,9 +1,8 @@
 import type { CancellationToken, ConfigurationChangeEvent, Disposable, Event } from 'vscode';
 import { EventEmitter, ProgressLocation, window } from 'vscode';
 import type { RepositoriesViewConfig, ViewBranchesLayout, ViewFilesLayout } from '../config';
-import { Commands } from '../constants.commands';
+import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
-import { getRemoteNameFromBranchName } from '../git/models/branch';
 import type { GitCommit } from '../git/models/commit';
 import { isCommit } from '../git/models/commit';
 import type { GitContributor } from '../git/models/contributor';
@@ -13,13 +12,14 @@ import type {
 	GitStashReference,
 	GitTagReference,
 } from '../git/models/reference';
-import { getReferenceLabel } from '../git/models/reference';
 import type { GitRemote } from '../git/models/remote';
 import type { GitWorktree } from '../git/models/worktree';
-import { gate } from '../system/decorators/gate';
-import { executeCommand } from '../system/vscode/command';
-import { configuration } from '../system/vscode/configuration';
-import { setContext } from '../system/vscode/context';
+import { getRemoteNameFromBranchName } from '../git/utils/branch.utils';
+import { getReferenceLabel } from '../git/utils/reference.utils';
+import { executeCommand } from '../system/-webview/command';
+import { configuration } from '../system/-webview/configuration';
+import { setContext } from '../system/-webview/context';
+import { gate } from '../system/decorators/-webview/gate';
 import { BranchesNode } from './nodes/branchesNode';
 import { BranchNode } from './nodes/branchNode';
 import { BranchOrTagFolderNode } from './nodes/branchOrTagFolderNode';
@@ -42,8 +42,8 @@ import { registerViewCommand } from './viewCommands';
 export class RepositoriesView extends ViewBase<'repositories', RepositoriesNode, RepositoriesViewConfig> {
 	protected readonly configKey = 'repositories';
 
-	constructor(container: Container) {
-		super(container, 'repositories', 'Repositories', 'repositoriesView');
+	constructor(container: Container, grouped?: boolean) {
+		super(container, 'repositories', 'Repositories', 'repositoriesView', grouped);
 	}
 
 	private _onDidChangeAutoRefresh = new EventEmitter<void>();
@@ -56,12 +56,10 @@ export class RepositoriesView extends ViewBase<'repositories', RepositoriesNode,
 	}
 
 	protected registerCommands(): Disposable[] {
-		void this.container.viewCommands;
-
 		return [
 			registerViewCommand(
 				this.getQualifiedCommand('copy'),
-				() => executeCommand(Commands.ViewsCopy, this.activeSelection, this.selection),
+				() => executeCommand(GlCommand.ViewsCopy, this.activeSelection, this.selection),
 				this,
 			),
 			registerViewCommand(
@@ -324,12 +322,13 @@ export class RepositoriesView extends ViewBase<'repositories', RepositoriesNode,
 		const { repoPath } = commit;
 
 		// Get all the branches the commit is on
-		let branches = await this.container.git.getCommitBranches(
-			commit.repoPath,
-			commit.ref,
-			undefined,
-			isCommit(commit) ? { commitDate: commit.committer.date } : undefined,
-		);
+		let branches = await this.container.git
+			.branches(commit.repoPath)
+			.getBranchesWithCommits(
+				[commit.ref],
+				undefined,
+				isCommit(commit) ? { commitDate: commit.committer.date } : undefined,
+			);
 		if (branches.length !== 0) {
 			return this.findNode((n: any) => n.commit?.ref === commit.ref, {
 				allowPaging: true,
@@ -358,12 +357,13 @@ export class RepositoriesView extends ViewBase<'repositories', RepositoriesNode,
 		}
 
 		// If we didn't find the commit on any local branches, check remote branches
-		branches = await this.container.git.getCommitBranches(
-			commit.repoPath,
-			commit.ref,
-			undefined,
-			isCommit(commit) ? { commitDate: commit.committer.date, remotes: true } : { remotes: true },
-		);
+		branches = await this.container.git
+			.branches(commit.repoPath)
+			.getBranchesWithCommits(
+				[commit.ref],
+				undefined,
+				isCommit(commit) ? { commitDate: commit.committer.date, remotes: true } : { remotes: true },
+			);
 		if (branches.length === 0) return undefined;
 
 		const remotes = branches.map(b => b.split('/', 1)[0]);

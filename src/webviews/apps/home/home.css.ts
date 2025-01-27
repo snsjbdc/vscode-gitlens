@@ -42,95 +42,57 @@ export const homeStyles = css`
 		gap: 0.4rem;
 		overflow: hidden;
 	}
-	.home__header {
+
+	.home__alerts {
 		flex: none;
 		padding: 0 2rem;
 		position: relative;
 	}
+	.home__alerts:not([has-alerts]) {
+		display: none;
+	}
+
 	.home__main {
 		flex: 1;
 		overflow: auto;
-		padding: 0.8rem 2rem;
+		padding: 0.8rem 1.2rem;
 	}
 	.home__main > *:last-child {
 		margin-bottom: 0;
 	}
-	.home__nav {
-		flex: none;
-	}
-	.home__footer {
+
+	.home__aux,
+	.home__header {
 		flex: none;
 	}
 
-	gl-home-account-content {
-		margin-bottom: 0;
+	.home__header {
+		border-top: 1px solid var(--vscode-sideBarSectionHeader-border);
+		border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
+		padding: 0.4rem;
+	}
+
+	.home__aux:has(gl-promo-banner:not([has-promo]):only-child) {
+		display: none;
+	}
+
+	summary {
+		font-size: 1.3rem;
+		font-weight: normal;
+		text-transform: uppercase;
+		color: var(--vscode-foreground);
+		cursor: pointer;
+	}
+
+	details[open] summary {
+		margin-block-end: 0.8rem;
+	}
+
+	gl-home-header {
+		margin: 0;
 	}
 
 	gl-repo-alerts:not([has-alerts]) {
-		display: none;
-	}
-`;
-
-export const inlineNavStyles = css`
-	.inline-nav {
-		display: flex;
-		flex-direction: row;
-		justify-content: space-between;
-	}
-	.inline-nav__group {
-		display: flex;
-		flex-direction: row;
-	}
-	.inline-nav__link {
-		display: flex;
-		justify-content: center;
-		align-items: center;
-		width: 2.2rem;
-		height: 2.2rem;
-		color: inherit;
-		border-radius: 0.3rem;
-	}
-	.inline-nav__link .code-icon {
-		line-height: 1.6rem;
-	}
-	.inline-nav__link:hover {
-		color: inherit;
-		text-decoration: none;
-	}
-	:host-context(.vscode-dark) .inline-nav__link:hover {
-		background-color: var(--color-background--lighten-10);
-	}
-	:host-context(.vscode-light) .inline-nav__link:hover {
-		background-color: var(--color-background--darken-10);
-	}
-	@media (max-width: 370px) {
-		.inline-nav__link--text > :last-child {
-			display: none;
-		}
-	}
-	@media (min-width: 371px) {
-		.inline-nav__link--text {
-			flex: none;
-			padding-left: 0.3rem;
-			padding-right: 0.3rem;
-			gap: 0.2rem;
-			min-width: 2.2rem;
-			width: fit-content;
-		}
-		.inline-nav__link--text + .inline-nav__link--text {
-			margin-left: 0.2rem;
-		}
-	}
-
-	.promo-banner {
-		text-align: center;
-		margin-bottom: 1rem;
-	}
-	.promo-banner--eyebrow {
-		color: var(--color-foreground--50);
-		margin-bottom: 0.2rem;
-	}
-	.promo-banner:not([has-promo]) {
 		display: none;
 	}
 `;
@@ -346,5 +308,57 @@ export const navListStyles = css`
 	}
 	.t-eyebrow.sticky {
 		top: -8px;
+	}
+`;
+
+export const walkthroughProgressStyles = css`
+	a,
+	a:hover,
+	a:focus,
+	a:active {
+		text-decoration: none;
+	}
+
+	.walkthrough-progress {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding: 2px 4px 4px;
+		margin-top: 4px;
+		align-items: stretch;
+		cursor: pointer;
+		border-radius: 4px;
+	}
+	.walkthrough-progress:focus-within,
+	.walkthrough-progress:hover {
+		background-color: var(--gl-walkthrough-hover-background);
+	}
+
+	.walkthrough-progress__title {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		color: var(--color-foreground--85);
+	}
+	.walkthrough-progress__button {
+		--button-padding: 1px 2px 0px 2px;
+	}
+	.walkthrough-progress__bar::-webkit-progress-bar {
+		border-radius: 2px;
+		background: var(--color-alert-neutralBackground);
+	}
+	.walkthrough-progress__bar::-webkit-progress-value {
+		background: var(--vscode-progressBar-background, blue);
+		transition: 0.1s ease-in;
+		border-radius: 2px;
+	}
+	.walkthrough-progress__bar {
+		pointer-events: none;
+		border-radius: 2px;
+		width: 100%;
+		background: unset;
+		height: 4px;
+		flex-shrink: 0;
+		z-index: 2;
 	}
 `;

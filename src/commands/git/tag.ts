@@ -1,16 +1,18 @@
 import { QuickInputButtons } from 'vscode';
 import type { Container } from '../../container';
 import type { GitReference, GitTagReference } from '../../git/models/reference';
+import type { Repository } from '../../git/models/repository';
 import {
-	getNameWithoutRemote,
 	getReferenceLabel,
+	getReferenceNameWithoutRemote,
 	isRevisionReference,
 	isTagReference,
-} from '../../git/models/reference';
-import type { Repository } from '../../git/models/repository';
+} from '../../git/utils/reference.utils';
+import { showGenericErrorMessage } from '../../messages';
 import type { QuickPickItemOfT } from '../../quickpicks/items/common';
 import type { FlagsQuickPickItem } from '../../quickpicks/items/flags';
 import { createFlagsQuickPickItem } from '../../quickpicks/items/flags';
+import { Logger } from '../../system/logger';
 import { pluralize } from '../../system/string';
 import type { ViewsWithRepositoryFolders } from '../../views/viewBase';
 import type {
@@ -149,7 +151,7 @@ export class TagGitCommand extends QuickCommand<State> {
 	protected async *steps(state: PartialStepState<State>): StepGenerator {
 		const context: Context = {
 			repos: this.container.git.openRepositories,
-			associatedView: this.container.tagsView,
+			associatedView: this.container.views.tags,
 			showTags: false,
 			title: this.title,
 		};
@@ -248,8 +250,8 @@ export class TagGitCommand extends QuickCommand<State> {
 				const result = yield* pickBranchOrTagStep(state, context, {
 					placeholder: context =>
 						`Choose a branch${context.showTags ? ' or tag' : ''} to create the new tag from`,
-					picked: state.reference?.ref ?? (await state.repo.git.getBranch())?.ref,
-					titleContext: ' from',
+					picked: state.reference?.ref ?? (await state.repo.git.branches().getBranch())?.ref,
+					title: `${context.title} from`,
 					value: isRevisionReference(state.reference) ? state.reference.ref : undefined,
 				});
 				// Always break on the first step (so we will go back)
@@ -261,13 +263,13 @@ export class TagGitCommand extends QuickCommand<State> {
 			if (state.counter < 4 || state.name == null) {
 				const result = yield* inputTagNameStep(state, context, {
 					placeholder: 'Please provide a name for the new tag',
-					titleContext: ` at ${getReferenceLabel(state.reference, {
+					title: `${context.title} at ${getReferenceLabel(state.reference, {
 						capitalize: true,
 						icon: false,
 					})}`,
 					value:
 						state.name ?? // if it's not a tag, pre-fill the name
-						(!isTagReference(state.reference) ? getNameWithoutRemote(state.reference) : undefined),
+						(!isTagReference(state.reference) ? getReferenceNameWithoutRemote(state.reference) : undefined),
 				});
 				if (result === StepResultBreak) continue;
 
@@ -293,12 +295,12 @@ export class TagGitCommand extends QuickCommand<State> {
 			}
 
 			endSteps(state);
-			state.repo.tag(
-				...state.flags,
-				...(state.message.length !== 0 ? [`"${state.message}"`] : []),
-				state.name,
-				state.reference.ref,
-			);
+			try {
+				await state.repo.git.tags().createTag?.(state.name, state.reference.ref, state.message);
+			} catch (ex) {
+				Logger.error(ex, context.title);
+				void showGenericErrorMessage(ex);
+			}
 		}
 	}
 
@@ -356,7 +358,7 @@ export class TagGitCommand extends QuickCommand<State> {
 		return canPickStepContinue(step, state, selection) ? selection[0].item : StepResultBreak;
 	}
 
-	private *deleteCommandSteps(state: DeleteStepState, context: Context): StepGenerator {
+	private async *deleteCommandSteps(state: DeleteStepState, context: Context): StepGenerator {
 		while (this.canStepsContinue(state)) {
 			if (state.references != null && !Array.isArray(state.references)) {
 				state.references = [state.references];
@@ -381,7 +383,14 @@ export class TagGitCommand extends QuickCommand<State> {
 			if (result === StepResultBreak) continue;
 
 			endSteps(state);
-			state.repo.tagDelete(state.references);
+			for (const { ref } of state.references) {
+				try {
+					await state.repo.git.tags().deleteTag?.(ref);
+				} catch (ex) {
+					Logger.error(ex, context.title);
+					void showGenericErrorMessage(ex);
+				}
+			}
 		}
 	}
 

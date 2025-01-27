@@ -6,10 +6,10 @@ import type {
 	Repository as ScmGitRepository,
 } from '../../../@types/vscode.git';
 import type { Container } from '../../../container';
+import { configuration } from '../../../system/-webview/configuration';
 import { log } from '../../../system/decorators/log';
 import { Logger } from '../../../system/logger';
 import { getLogScope } from '../../../system/logger.scope';
-import { configuration } from '../../../system/vscode/configuration';
 
 class AICommitMessageProvider implements CommitMessageProvider, Disposable {
 	icon: ThemeIcon = new ThemeIcon('sparkle');
@@ -28,8 +28,8 @@ class AICommitMessageProvider implements CommitMessageProvider, Disposable {
 	}
 
 	private onConfigurationChanged(e?: ConfigurationChangeEvent) {
-		if (e == null || configuration.changed(e, 'ai.experimental.generateCommitMessage.enabled')) {
-			if (configuration.get('ai.experimental.generateCommitMessage.enabled')) {
+		if (e == null || configuration.changed(e, 'ai.generateCommitMessage.enabled')) {
+			if (configuration.get('ai.generateCommitMessage.enabled')) {
 				this._subscription = this.scmGit.registerCommitMessageProvider(this);
 			} else {
 				this._subscription?.dispose();

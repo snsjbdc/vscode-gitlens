@@ -3,7 +3,7 @@ import { GlyphChars } from '../../constants';
 import { PlusFeatures } from '../../features';
 import type { GitUri } from '../../git/gitUri';
 import type { Repository } from '../../git/models/repository';
-import { sortWorktrees } from '../../git/models/worktree';
+import { sortWorktrees } from '../../git/utils/-webview/sorting';
 import { filterMap } from '../../system/array';
 import { debug } from '../../system/decorators/log';
 import { map } from '../../system/iterable';
@@ -41,8 +41,8 @@ export class WorktreesNode extends CacheableChildrenViewNode<'worktrees', ViewsW
 			const access = await this.repo.access(PlusFeatures.Worktrees);
 			if (!access.allowed) return [];
 
-			const worktrees = await this.repo.git.getWorktrees();
-			if (worktrees.length === 0) return [new MessageNode(this.view, this, 'No worktrees could be found.')];
+			const worktrees = await this.repo.git.worktrees()?.getWorktrees();
+			if (!worktrees?.length) return [new MessageNode(this.view, this, 'No worktrees could be found.')];
 
 			this.children = filterMap(
 				await Promise.allSettled(
@@ -76,7 +76,7 @@ export class WorktreesNode extends CacheableChildrenViewNode<'worktrees', ViewsW
 		item.contextValue = ContextValues.Worktrees;
 		item.description = access.allowed
 			? undefined
-			: ` ${GlyphChars.Warning}  Requires a trial or paid plan for use on privately-hosted repos`;
+			: ` ${GlyphChars.Warning}  Use on privately-hosted repos requires GitLens Pro`;
 		// TODO@eamodio `folder` icon won't work here for some reason
 		item.iconPath = new ThemeIcon('folder-opened');
 		return item;

@@ -1,8 +1,9 @@
-import type { TextEditor, TextEditorDecorationType, TextEditorSelectionChangeEvent } from 'vscode';
+import type { Tab, TextEditor, TextEditorDecorationType, TextEditorSelectionChangeEvent } from 'vscode';
 import { Disposable, window } from 'vscode';
 import type { FileAnnotationType } from '../config';
 import type { AnnotationStatus } from '../constants';
 import type { Container } from '../container';
+import { getTabUri } from '../system/-webview/vscode';
 import { Logger } from '../system/logger';
 import type { Deferred } from '../system/promise';
 import { defer } from '../system/promise';
@@ -18,9 +19,14 @@ export interface AnnotationState {
 	restoring?: boolean;
 }
 
-export type TextEditorCorrelationKey = string;
+export type TextEditorCorrelationKey = `${string}|${number}`;
 export function getEditorCorrelationKey(editor: TextEditor | undefined): TextEditorCorrelationKey {
-	return `${editor?.document.uri.toString()}|${editor?.viewColumn}`;
+	return `${editor?.document.uri.toString()}|${editor?.viewColumn ?? 0}`;
+}
+
+export function getEditorCorrelationKeyFromTab(tab: Tab): TextEditorCorrelationKey {
+	const uri = getTabUri(tab);
+	return `${uri?.toString()}|${tab.group.viewColumn}`;
 }
 
 export type DidChangeStatusCallback = (e: { editor?: TextEditor; status?: AnnotationStatus }) => void;

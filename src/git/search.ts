@@ -2,27 +2,27 @@ import type { SearchOperators, SearchOperatorsLongForm, SearchQuery } from '../c
 import { searchOperationRegex, searchOperatorsToLongFormMap } from '../constants.search';
 import type { StoredSearchQuery } from '../constants.storage';
 import type { GitRevisionReference } from './models/reference';
-import { isSha, shortenRevision } from './models/reference';
 import type { GitUser } from './models/user';
+import { isSha, shortenRevision } from './utils/revision.utils';
 
-export interface GitSearchResultData {
+export interface GitGraphSearchResultData {
 	date: number;
 	i: number;
 }
-export type GitSearchResults = Map<string, GitSearchResultData>;
+export type GitGraphSearchResults = Map<string, GitGraphSearchResultData>;
 
-export interface GitSearch {
+export interface GitGraphSearch {
 	repoPath: string;
 	query: SearchQuery;
 	comparisonKey: string;
-	results: GitSearchResults;
+	results: GitGraphSearchResults;
 
 	readonly paging?: {
 		readonly limit: number | undefined;
 		readonly hasMore: boolean;
 	};
 
-	more?(limit: number): Promise<GitSearch>;
+	more?(limit: number): Promise<GitGraphSearch>;
 }
 
 export function getSearchQuery(search: StoredSearchQuery): SearchQuery {
